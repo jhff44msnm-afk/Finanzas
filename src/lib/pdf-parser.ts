@@ -104,12 +104,10 @@ export async function parsePdfFile(
   file: File,
   statementId: string
 ): Promise<{ transactions: Transaction[]; text: string }> {
+  // @ts-expect-error -- load worker on main thread to avoid iOS Safari Worker issues
+  globalThis.pdfjsWorker = await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
   const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  const base =
-    typeof window !== "undefined" && window.location.pathname.startsWith("/Finanzas")
-      ? "/Finanzas"
-      : "";
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `${base}/pdf.worker.min.mjs`;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "unused";
 
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
