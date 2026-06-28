@@ -47,10 +47,33 @@ export default function Dashboard() {
         categoryData: [],
         recentTx: [],
         currentBalance: 0,
+        currentMonth: "",
       };
     }
 
-    const nonTransfer = transactions.filter(
+    const sorted = [...transactions].sort((a, b) => {
+      const dateCmp = new Date(a.date).getTime() - new Date(b.date).getTime();
+      if (dateCmp !== 0) return dateCmp;
+      return (a.seq ?? 0) - (b.seq ?? 0);
+    });
+
+    const lastTx = sorted[sorted.length - 1];
+    const currentBalance = lastTx.balance;
+
+    const latestDate = new Date(lastTx.date);
+    const latestMonth = latestDate.getMonth();
+    const latestYear = latestDate.getFullYear();
+    const currentMonth = latestDate.toLocaleDateString("en-US", {
+      month: "long",
+      year: "numeric",
+    });
+
+    const monthTx = sorted.filter((t) => {
+      const d = new Date(t.date);
+      return d.getMonth() === latestMonth && d.getFullYear() === latestYear;
+    });
+
+    const nonTransfer = monthTx.filter(
       (t) => t.category !== "Transfers" && t.category !== "Adjustments"
     );
     const totalIncome = nonTransfer
@@ -88,20 +111,18 @@ export default function Dashboard() {
       }))
       .sort((a, b) => b.value - a.value);
 
-    const sorted = [...transactions].sort(
-      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-    );
-    const currentBalance = sorted[0]?.balance ?? 0;
+    const recentTx = [...sorted].reverse().slice(0, 8);
 
     return {
       totalIncome,
       totalExpenses,
       netFlow: totalIncome - totalExpenses,
-      txCount: transactions.length,
+      txCount: monthTx.length,
       weeklyData,
       categoryData,
-      recentTx: sorted.slice(0, 8),
+      recentTx,
       currentBalance,
+      currentMonth,
     };
   }, [transactions]);
 
@@ -131,14 +152,14 @@ export default function Dashboard() {
       bg: "bg-blue-50",
     },
     {
-      label: "Total Income",
+      label: "Monthly Income",
       value: stats.totalIncome,
       icon: TrendingUp,
       color: "text-green-600",
       bg: "bg-green-50",
     },
     {
-      label: "Total Expenses",
+      label: "Monthly Expenses",
       value: stats.totalExpenses,
       icon: TrendingDown,
       color: "text-red-600",
@@ -156,7 +177,12 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold text-gray-800">Dashboard</h2>
+      <div className="flex items-baseline gap-3">
+        <h2 className="text-2xl font-bold text-gray-800">Dashboard</h2>
+        {stats.currentMonth && (
+          <span className="text-sm text-gray-500">{stats.currentMonth}</span>
+        )}
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {statCards.map((card) => (

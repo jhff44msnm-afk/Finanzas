@@ -6,6 +6,7 @@ export interface Transaction {
   balance: number;
   category: string;
   statementId: string;
+  seq: number;
 }
 
 export interface Statement {
