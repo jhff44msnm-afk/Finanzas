@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Search, Pencil, Check, X, Filter, Plus } from "lucide-react";
+import { Search, Pencil, Check, X, Filter, Plus, Calendar } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import { useAppState, useAppDispatch } from "@/lib/store";
 import { CATEGORIES, CATEGORY_COLORS } from "@/lib/categories";
@@ -24,9 +24,35 @@ export default function TransactionsView() {
   const [newAmount, setNewAmount] = useState("");
   const [newCategory, setNewCategory] = useState("Other");
   const [newIsExpense, setNewIsExpense] = useState(true);
+  const [timeFilter, setTimeFilter] = useState<"all" | "month" | "week" | "custom">("all");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
 
   const filtered = useMemo(() => {
     let result = [...transactions];
+
+    if (timeFilter !== "all") {
+      const now = new Date();
+      let fromDate: Date;
+      let toDate: Date = now;
+
+      if (timeFilter === "week") {
+        fromDate = new Date(now);
+        fromDate.setDate(now.getDate() - 7);
+      } else if (timeFilter === "month") {
+        fromDate = new Date(now);
+        fromDate.setMonth(now.getMonth() - 1);
+      } else {
+        fromDate = customFrom ? new Date(customFrom) : new Date(0);
+        toDate = customTo ? new Date(customTo + "T23:59:59") : now;
+      }
+
+      result = result.filter((t) => {
+        const d = new Date(t.date);
+        return d >= fromDate && d <= toDate;
+      });
+    }
+
     if (search) {
       const q = search.toLowerCase();
       result = result.filter(
@@ -49,7 +75,7 @@ export default function TransactionsView() {
       return sortDir === "asc" ? cmp : -cmp;
     });
     return result;
-  }, [transactions, search, categoryFilter, sortField, sortDir]);
+  }, [transactions, search, categoryFilter, sortField, sortDir, timeFilter, customFrom, customTo]);
 
   const handleSort = (field: "date" | "amount" | "balance") => {
     if (sortField === field) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -234,7 +260,43 @@ export default function TransactionsView() {
             ))}
           </select>
         </div>
+        <div className="flex items-center gap-2">
+          <Calendar size={16} className="text-gray-400" />
+          <select
+            value={timeFilter}
+            onChange={(e) => setTimeFilter(e.target.value as "all" | "month" | "week" | "custom")}
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="all">All Time</option>
+            <option value="week">Last Week</option>
+            <option value="month">Last Month</option>
+            <option value="custom">Custom Range</option>
+          </select>
+        </div>
       </div>
+
+      {timeFilter === "custom" && (
+        <div className="flex flex-wrap gap-3 items-center">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-500">From</label>
+            <input
+              type="date"
+              value={customFrom}
+              onChange={(e) => setCustomFrom(e.target.value)}
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-500">To</label>
+            <input
+              type="date"
+              value={customTo}
+              onChange={(e) => setCustomTo(e.target.value)}
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+        </div>
+      )}
 
       <div className="flex gap-4 text-sm">
         <span className="text-gray-500">

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Trash2, Target } from "lucide-react";
+import { Plus, Trash2, Target, Lightbulb } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import { useAppState, useAppDispatch } from "@/lib/store";
 
@@ -196,6 +196,51 @@ export default function GoalsView() {
                     {pct.toFixed(1)}%
                   </p>
                 </div>
+
+                {(() => {
+                  const remaining = goal.targetAmount - goal.currentAmount;
+                  if (remaining <= 0) {
+                    return (
+                      <div className="bg-green-50 border border-green-200 rounded-lg p-3 flex items-start gap-2">
+                        <Lightbulb size={16} className="text-green-600 mt-0.5 shrink-0" />
+                        <p className="text-sm text-green-700 font-medium">Goal reached! Congratulations!</p>
+                      </div>
+                    );
+                  }
+                  if (daysLeft !== null && daysLeft > 0) {
+                    const weeksLeft = Math.max(daysLeft / 7, 1);
+                    const monthsLeft = Math.max(daysLeft / 30, 1);
+                    const perWeek = remaining / weeksLeft;
+                    const perMonth = remaining / monthsLeft;
+                    return (
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-start gap-2">
+                        <Lightbulb size={16} className="text-blue-600 mt-0.5 shrink-0" />
+                        <div className="text-sm text-blue-700">
+                          <p className="font-medium mb-1">To reach this goal:</p>
+                          <p>Save <span className="font-semibold">${perWeek.toFixed(2)}/week</span> or <span className="font-semibold">${perMonth.toFixed(2)}/month</span></p>
+                          <p className="text-blue-500 text-xs mt-1">${remaining.toLocaleString("en-US", { minimumFractionDigits: 2 })} remaining</p>
+                        </div>
+                      </div>
+                    );
+                  }
+                  if (daysLeft !== null && daysLeft === 0) {
+                    return (
+                      <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2">
+                        <Lightbulb size={16} className="text-red-500 mt-0.5 shrink-0" />
+                        <div className="text-sm text-red-700">
+                          <p className="font-medium">Deadline passed</p>
+                          <p>${remaining.toLocaleString("en-US", { minimumFractionDigits: 2 })} still needed. Consider extending your deadline.</p>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex items-start gap-2">
+                      <Lightbulb size={16} className="text-gray-500 mt-0.5 shrink-0" />
+                      <p className="text-sm text-gray-600">Set a deadline to get weekly and monthly saving targets.</p>
+                    </div>
+                  );
+                })()}
 
                 {editId === goal.id ? (
                   <div className="flex gap-2">
