@@ -14,9 +14,7 @@ export default function TransactionsView() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editCategory, setEditCategory] = useState("");
   const [editDescription, setEditDescription] = useState("");
-  const [sortField, setSortField] = useState<"date" | "amount" | "balance">(
-    "date"
-  );
+  const [sortField, setSortField] = useState<"date" | "amount" | "balance">("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [showAddForm, setShowAddForm] = useState(false);
   const [newDate, setNewDate] = useState(new Date().toISOString().slice(0, 10));
@@ -28,6 +26,9 @@ export default function TransactionsView() {
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
 
+  const inputClass =
+    "w-full border border-[#E8E2DA] rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[#7C8C6E] bg-white text-[#2D2D2D]";
+
   const filtered = useMemo(() => {
     let result = [...transactions];
 
@@ -35,7 +36,6 @@ export default function TransactionsView() {
       const now = new Date();
       let fromDate: Date;
       let toDate: Date = now;
-
       if (timeFilter === "week") {
         fromDate = new Date(now);
         fromDate.setDate(now.getDate() - 7);
@@ -46,7 +46,6 @@ export default function TransactionsView() {
         fromDate = customFrom ? new Date(customFrom) : new Date(0);
         toDate = customTo ? new Date(customTo + "T23:59:59") : now;
       }
-
       result = result.filter((t) => {
         const d = new Date(t.date);
         return d >= fromDate && d <= toDate;
@@ -100,11 +99,7 @@ export default function TransactionsView() {
     if (tx) {
       dispatch({
         type: "UPDATE_TRANSACTION",
-        payload: {
-          ...tx,
-          category: editCategory,
-          description: editDescription,
-        },
+        payload: { ...tx, category: editCategory, description: editDescription },
       });
     }
     setEditingId(null);
@@ -113,9 +108,7 @@ export default function TransactionsView() {
   const addTransaction = () => {
     const amt = parseFloat(newAmount);
     if (!newDescription.trim() || isNaN(amt) || amt === 0) return;
-
     const maxSeq = transactions.reduce((max, t) => Math.max(max, t.seq ?? 0), 0);
-
     dispatch({
       type: "ADD_TRANSACTION",
       payload: {
@@ -129,7 +122,6 @@ export default function TransactionsView() {
         seq: maxSeq + 1,
       },
     });
-
     setNewDescription("");
     setNewAmount("");
     setNewCategory("Other");
@@ -146,301 +138,201 @@ export default function TransactionsView() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-800">Transactions</h2>
+        <h2 className="text-xl font-bold text-[#2D2D2D]">Activity</h2>
         <button
           onClick={() => setShowAddForm(!showAddForm)}
-          className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+          className="flex items-center gap-1.5 bg-[#7C8C6E] text-white px-3.5 py-2 rounded-xl text-sm font-medium hover:bg-[#6B7A5E] transition-colors"
         >
           <Plus size={16} />
-          Add Transaction
+          Add
         </button>
       </div>
 
       {showAddForm && (
-        <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
-          <h3 className="font-semibold text-gray-700">New Transaction</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="bg-white rounded-2xl border border-[#E8E2DA] p-4 space-y-3">
+          <h3 className="font-semibold text-[#2D2D2D] text-sm">New Transaction</h3>
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Date</label>
-              <input
-                type="date"
-                value={newDate}
-                onChange={(e) => setNewDate(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-              />
+              <label className="block text-[10px] text-[#8B8578] mb-1 font-medium uppercase tracking-wider">Date</label>
+              <input type="date" value={newDate} onChange={(e) => setNewDate(e.target.value)} className={inputClass} />
             </div>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Description</label>
-              <input
-                type="text"
-                value={newDescription}
-                onChange={(e) => setNewDescription(e.target.value)}
-                placeholder="e.g. Cash payment"
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-              />
+              <label className="block text-[10px] text-[#8B8578] mb-1 font-medium uppercase tracking-wider">Category</label>
+              <select value={newCategory} onChange={(e) => setNewCategory(e.target.value)} className={inputClass}>
+                {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
             </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Amount</label>
+            <div className="col-span-2">
+              <label className="block text-[10px] text-[#8B8578] mb-1 font-medium uppercase tracking-wider">Description</label>
+              <input type="text" value={newDescription} onChange={(e) => setNewDescription(e.target.value)} placeholder="e.g. Cash payment" className={inputClass} />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-[10px] text-[#8B8578] mb-1 font-medium uppercase tracking-wider">Amount</label>
               <div className="flex gap-2">
                 <select
                   value={newIsExpense ? "expense" : "income"}
                   onChange={(e) => setNewIsExpense(e.target.value === "expense")}
-                  className="border border-gray-200 rounded-lg px-2 py-2 text-sm outline-none"
+                  className="border border-[#E8E2DA] rounded-xl px-3 py-2.5 text-sm outline-none bg-white w-20"
                 >
                   <option value="expense">-</option>
                   <option value="income">+</option>
                 </select>
-                <input
-                  type="number"
-                  value={newAmount}
-                  onChange={(e) => setNewAmount(e.target.value)}
-                  placeholder="0.00"
-                  step="0.01"
-                  min="0"
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                />
+                <input type="number" value={newAmount} onChange={(e) => setNewAmount(e.target.value)} placeholder="0.00" step="0.01" min="0" className={inputClass} />
               </div>
             </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Category</label>
-              <select
-                value={newCategory}
-                onChange={(e) => setNewCategory(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {CATEGORIES.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            </div>
           </div>
-          <div className="flex gap-2">
-            <button
-              onClick={addTransaction}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700"
-            >
-              Add
-            </button>
-            <button
-              onClick={() => setShowAddForm(false)}
-              className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-200"
-            >
-              Cancel
-            </button>
+          <div className="flex gap-2 pt-1">
+            <button onClick={addTransaction} className="bg-[#7C8C6E] text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-[#6B7A5E]">Add</button>
+            <button onClick={() => setShowAddForm(false)} className="bg-[#F5F0EB] text-[#5C5549] px-4 py-2 rounded-xl text-sm font-medium hover:bg-[#EDE7DF]">Cancel</button>
           </div>
         </div>
       )}
 
-      <div className="flex flex-wrap gap-3 items-center">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search
-            size={16}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-          />
+      <div className="space-y-3">
+        <div className="relative">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#B5AFA6]" />
           <input
             type="text"
             placeholder="Search transactions..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+            className="w-full pl-9 pr-4 py-2.5 border border-[#E8E2DA] rounded-xl text-sm focus:ring-2 focus:ring-[#7C8C6E] outline-none bg-white text-[#2D2D2D] placeholder-[#B5AFA6]"
           />
         </div>
-        <div className="flex items-center gap-2">
-          <Filter size={16} className="text-gray-400" />
-          <select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            className="border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="All">All Categories</option>
-            {CATEGORIES.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
+
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Filter size={14} className="text-[#B5AFA6]" />
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="border border-[#E8E2DA] rounded-xl px-2.5 py-1.5 text-xs outline-none bg-white text-[#2D2D2D]"
+            >
+              <option value="All">All Categories</option>
+              {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Calendar size={14} className="text-[#B5AFA6]" />
+            <select
+              value={timeFilter}
+              onChange={(e) => setTimeFilter(e.target.value as "all" | "month" | "week" | "custom")}
+              className="border border-[#E8E2DA] rounded-xl px-2.5 py-1.5 text-xs outline-none bg-white text-[#2D2D2D]"
+            >
+              <option value="all">All Time</option>
+              <option value="week">Last Week</option>
+              <option value="month">Last Month</option>
+              <option value="custom">Custom</option>
+            </select>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Calendar size={16} className="text-gray-400" />
-          <select
-            value={timeFilter}
-            onChange={(e) => setTimeFilter(e.target.value as "all" | "month" | "week" | "custom")}
-            className="border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="all">All Time</option>
-            <option value="week">Last Week</option>
-            <option value="month">Last Month</option>
-            <option value="custom">Custom Range</option>
-          </select>
-        </div>
+
+        {timeFilter === "custom" && (
+          <div className="flex gap-2">
+            <div className="flex items-center gap-1.5 flex-1">
+              <label className="text-xs text-[#8B8578] shrink-0">From</label>
+              <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="flex-1 border border-[#E8E2DA] rounded-xl px-2.5 py-1.5 text-xs outline-none bg-white" />
+            </div>
+            <div className="flex items-center gap-1.5 flex-1">
+              <label className="text-xs text-[#8B8578] shrink-0">To</label>
+              <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="flex-1 border border-[#E8E2DA] rounded-xl px-2.5 py-1.5 text-xs outline-none bg-white" />
+            </div>
+          </div>
+        )}
       </div>
 
-      {timeFilter === "custom" && (
-        <div className="flex flex-wrap gap-3 items-center">
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-gray-500">From</label>
-            <input
-              type="date"
-              value={customFrom}
-              onChange={(e) => setCustomFrom(e.target.value)}
-              className="border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-gray-500">To</label>
-            <input
-              type="date"
-              value={customTo}
-              onChange={(e) => setCustomTo(e.target.value)}
-              className="border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-        </div>
-      )}
-
-      <div className="flex gap-4 text-sm">
-        <span className="text-gray-500">
-          {filtered.length} transactions
-        </span>
-        <span className="text-green-600 font-medium">
-          Income: ${totalIncome.toFixed(2)}
-        </span>
-        <span className="text-red-600 font-medium">
-          Expenses: ${totalExpenses.toFixed(2)}
-        </span>
+      <div className="flex gap-3 text-xs">
+        <span className="text-[#8B8578]">{filtered.length} transactions</span>
+        <span className="text-[#6B9B7A] font-semibold">+${totalIncome.toFixed(2)}</span>
+        <span className="text-[#C4756E] font-semibold">-${totalExpenses.toFixed(2)}</span>
       </div>
 
       {transactions.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center py-16">
+        <div className="flex items-center justify-center py-16">
           <div className="text-center">
-            <p className="text-gray-500 text-lg">No transactions yet.</p>
-            <p className="text-gray-400 text-sm mt-1">
-              Upload a bank statement or add transactions manually.
-            </p>
+            <p className="text-[#8B8578]">No transactions yet.</p>
+            <p className="text-[#B5AFA6] text-sm mt-1">Upload a statement or add manually.</p>
           </div>
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-gray-50 border-b border-gray-200">
-                  <th
-                    className="text-left py-3 px-4 text-gray-600 font-semibold cursor-pointer hover:text-gray-900"
-                    onClick={() => handleSort("date")}
+        <div className="space-y-2">
+          {filtered.map((tx) => (
+            <div
+              key={tx.id}
+              className="bg-white rounded-2xl border border-[#E8E2DA] p-3.5"
+            >
+              {editingId === tx.id ? (
+                <div className="space-y-2">
+                  <input
+                    value={editDescription}
+                    onChange={(e) => setEditDescription(e.target.value)}
+                    className={inputClass}
+                  />
+                  <select
+                    value={editCategory}
+                    onChange={(e) => setEditCategory(e.target.value)}
+                    className={inputClass}
                   >
-                    Date {sortField === "date" && (sortDir === "asc" ? "↑" : "↓")}
-                  </th>
-                  <th className="text-left py-3 px-4 text-gray-600 font-semibold">
-                    Description
-                  </th>
-                  <th className="text-left py-3 px-4 text-gray-600 font-semibold">
-                    Category
-                  </th>
-                  <th
-                    className="text-right py-3 px-4 text-gray-600 font-semibold cursor-pointer hover:text-gray-900"
-                    onClick={() => handleSort("amount")}
-                  >
-                    Amount{" "}
-                    {sortField === "amount" && (sortDir === "asc" ? "↑" : "↓")}
-                  </th>
-                  <th
-                    className="text-right py-3 px-4 text-gray-600 font-semibold cursor-pointer hover:text-gray-900"
-                    onClick={() => handleSort("balance")}
-                  >
-                    Balance{" "}
-                    {sortField === "balance" && (sortDir === "asc" ? "↑" : "↓")}
-                  </th>
-                  <th className="py-3 px-4 w-16"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((tx) => (
-                  <tr
-                    key={tx.id}
-                    className="border-b border-gray-50 hover:bg-blue-50/30 transition-colors"
-                  >
-                    <td className="py-3 px-4 text-gray-600">{tx.date}</td>
-                    <td className="py-3 px-4">
-                      {editingId === tx.id ? (
-                        <input
-                          value={editDescription}
-                          onChange={(e) => setEditDescription(e.target.value)}
-                          className="border border-blue-300 rounded px-2 py-1 text-sm w-full outline-none focus:ring-1 focus:ring-blue-500"
-                        />
-                      ) : (
-                        <span className="text-gray-800 font-medium">
-                          {tx.description}
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-3 px-4">
-                      {editingId === tx.id ? (
-                        <select
-                          value={editCategory}
-                          onChange={(e) => setEditCategory(e.target.value)}
-                          className="border border-blue-300 rounded px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-blue-500"
-                        >
-                          {CATEGORIES.map((c) => (
-                            <option key={c} value={c}>
-                              {c}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
+                    {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <div className="flex gap-2">
+                    <button onClick={saveEdit} className="flex items-center gap-1 bg-[#6B9B7A] text-white px-3 py-1.5 rounded-lg text-xs font-medium">
+                      <Check size={14} /> Save
+                    </button>
+                    <button onClick={() => setEditingId(null)} className="flex items-center gap-1 bg-[#F5F0EB] text-[#5C5549] px-3 py-1.5 rounded-lg text-xs font-medium">
+                      <X size={14} /> Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div
+                      className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+                      style={{
+                        backgroundColor: (CATEGORY_COLORS[tx.category] ?? "#B5AFA6") + "18",
+                      }}
+                    >
+                      <span className="text-xs font-bold" style={{ color: CATEGORY_COLORS[tx.category] ?? "#B5AFA6" }}>
+                        {tx.category.charAt(0)}
+                      </span>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-[#2D2D2D] truncate">{tx.description}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[10px] text-[#B5AFA6]">{tx.date}</span>
                         <span
-                          className="px-2 py-0.5 rounded-full text-xs font-medium"
+                          className="text-[10px] font-medium px-1.5 py-0.5 rounded-full"
                           style={{
-                            backgroundColor:
-                              (CATEGORY_COLORS[tx.category] ?? "#94a3b8") + "20",
-                            color: CATEGORY_COLORS[tx.category] ?? "#94a3b8",
+                            backgroundColor: (CATEGORY_COLORS[tx.category] ?? "#B5AFA6") + "15",
+                            color: CATEGORY_COLORS[tx.category] ?? "#B5AFA6",
                           }}
                         >
                           {tx.category}
                         </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0 ml-2">
+                    <div className="text-right">
+                      <p className={`text-sm font-semibold ${tx.amount >= 0 ? "text-[#6B9B7A]" : "text-[#C4756E]"}`}>
+                        {tx.amount >= 0 ? "+" : "-"}${Math.abs(tx.amount).toFixed(2)}
+                      </p>
+                      {tx.statementId !== "manual" && (
+                        <p className="text-[10px] text-[#B5AFA6]">${tx.balance.toFixed(2)}</p>
                       )}
-                    </td>
-                    <td
-                      className={`py-3 px-4 text-right font-semibold ${
-                        tx.amount >= 0 ? "text-green-600" : "text-red-600"
-                      }`}
+                    </div>
+                    <button
+                      onClick={() => startEdit(tx.id)}
+                      className="p-1.5 text-[#B5AFA6] hover:text-[#7C8C6E] hover:bg-[#7C8C6E]/10 rounded-lg transition-colors"
                     >
-                      {tx.amount >= 0 ? "+" : "-"}$
-                      {Math.abs(tx.amount).toFixed(2)}
-                    </td>
-                    <td className="py-3 px-4 text-right text-gray-600">
-                      {tx.statementId === "manual" ? "—" : `$${tx.balance.toFixed(2)}`}
-                    </td>
-                    <td className="py-3 px-4">
-                      {editingId === tx.id ? (
-                        <div className="flex gap-1">
-                          <button
-                            onClick={saveEdit}
-                            className="p-1 text-green-600 hover:bg-green-50 rounded"
-                          >
-                            <Check size={16} />
-                          </button>
-                          <button
-                            onClick={() => setEditingId(null)}
-                            className="p-1 text-red-600 hover:bg-red-50 rounded"
-                          >
-                            <X size={16} />
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => startEdit(tx.id)}
-                          className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded"
-                        >
-                          <Pencil size={16} />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                      <Pencil size={14} />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>

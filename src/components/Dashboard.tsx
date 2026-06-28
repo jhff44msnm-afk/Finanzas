@@ -5,7 +5,7 @@ import {
   TrendingDown,
   TrendingUp,
   ArrowLeftRight,
-  DollarSign,
+  Wallet,
 } from "lucide-react";
 import {
   BarChart,
@@ -25,16 +25,18 @@ import { CATEGORY_COLORS } from "@/lib/categories";
 
 function getWeekNumber(dateStr: string): number {
   const d = new Date(dateStr);
-  const dayOfMonth = d.getDate();
-  return Math.ceil(dayOfMonth / 7);
-}
-
-function getWeekLabel(weekNum: number): string {
-  return `Week ${weekNum}`;
+  return Math.ceil(d.getDate() / 7);
 }
 
 export default function Dashboard() {
   const { transactions } = useAppState();
+
+  const greeting = useMemo(() => {
+    const h = new Date().getHours();
+    if (h < 12) return "Good morning";
+    if (h < 18) return "Good afternoon";
+    return "Good evening";
+  }, []);
 
   const stats = useMemo(() => {
     if (transactions.length === 0) {
@@ -94,7 +96,7 @@ export default function Dashboard() {
     const weeklyData = Array.from(weekMap.entries())
       .sort(([a], [b]) => a - b)
       .map(([week, data]) => ({
-        name: getWeekLabel(week),
+        name: `W${week}`,
         Income: Math.round(data.income * 100) / 100,
         Expenses: Math.round(data.expenses * 100) / 100,
       }));
@@ -111,7 +113,7 @@ export default function Dashboard() {
       }))
       .sort((a, b) => b.value - a.value);
 
-    const recentTx = [...sorted].reverse().slice(0, 8);
+    const recentTx = [...sorted].reverse().slice(0, 6);
 
     return {
       totalIncome,
@@ -128,16 +130,24 @@ export default function Dashboard() {
 
   if (transactions.length === 0) {
     return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="text-center max-w-md">
-          <DollarSign size={64} className="mx-auto text-gray-300 mb-4" />
-          <h2 className="text-2xl font-semibold text-gray-700 mb-2">
-            Welcome to Finanzas
-          </h2>
-          <p className="text-gray-500">
-            Upload a bank statement in the Statements section to get started.
-            Your transactions will be automatically parsed and categorized.
-          </p>
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold text-[#2D2D2D]">{greeting}</h1>
+          <p className="text-[#8B8578] text-sm mt-1">Welcome to Finanzas</p>
+        </div>
+        <div className="flex items-center justify-center py-20">
+          <div className="text-center">
+            <div className="w-20 h-20 rounded-full bg-[#7C8C6E]/10 flex items-center justify-center mx-auto mb-4">
+              <Wallet size={36} className="text-[#7C8C6E]" />
+            </div>
+            <h2 className="text-lg font-semibold text-[#2D2D2D] mb-2">
+              Start tracking your finances
+            </h2>
+            <p className="text-[#8B8578] text-sm max-w-xs">
+              Upload a bank statement in the Uploads tab to get started.
+              Your transactions will be automatically parsed and categorized.
+            </p>
+          </div>
         </div>
       </div>
     );
@@ -145,58 +155,58 @@ export default function Dashboard() {
 
   const statCards = [
     {
-      label: "Current Balance",
+      label: "Balance",
       value: stats.currentBalance,
-      icon: DollarSign,
-      color: "text-blue-600",
-      bg: "bg-blue-50",
+      icon: Wallet,
+      iconColor: "#7C8C6E",
+      iconBg: "bg-[#7C8C6E]/10",
     },
     {
-      label: "Monthly Income",
+      label: "Income",
       value: stats.totalIncome,
       icon: TrendingUp,
-      color: "text-green-600",
-      bg: "bg-green-50",
+      iconColor: "#6B9B7A",
+      iconBg: "bg-[#6B9B7A]/10",
     },
     {
-      label: "Monthly Expenses",
+      label: "Expenses",
       value: stats.totalExpenses,
       icon: TrendingDown,
-      color: "text-red-600",
-      bg: "bg-red-50",
+      iconColor: "#C4756E",
+      iconBg: "bg-[#C4756E]/10",
     },
     {
       label: "Transactions",
       value: stats.txCount,
       icon: ArrowLeftRight,
-      color: "text-purple-600",
-      bg: "bg-purple-50",
+      iconColor: "#D4A76A",
+      iconBg: "bg-[#D4A76A]/10",
       isCurrency: false,
     },
   ];
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-baseline gap-3">
-        <h2 className="text-2xl font-bold text-gray-800">Dashboard</h2>
+    <div className="space-y-5">
+      <div>
+        <h1 className="text-2xl font-bold text-[#2D2D2D]">{greeting}</h1>
         {stats.currentMonth && (
-          <span className="text-sm text-gray-500">{stats.currentMonth}</span>
+          <p className="text-[#8B8578] text-sm mt-0.5">{stats.currentMonth}</p>
         )}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-3">
         {statCards.map((card) => (
           <div
             key={card.label}
-            className="bg-white rounded-xl border border-gray-200 p-5"
+            className="bg-white rounded-2xl border border-[#E8E2DA] p-4"
           >
-            <div className="flex items-center gap-3 mb-3">
-              <div className={`p-2 rounded-lg ${card.bg}`}>
-                <card.icon size={20} className={card.color} />
+            <div className="flex items-center gap-2 mb-2">
+              <div className={`p-1.5 rounded-xl ${card.iconBg}`}>
+                <card.icon size={16} style={{ color: card.iconColor }} />
               </div>
-              <span className="text-sm text-gray-500">{card.label}</span>
+              <span className="text-xs text-[#8B8578] font-medium">{card.label}</span>
             </div>
-            <p className="text-2xl font-bold text-gray-800">
+            <p className="text-xl font-bold text-[#2D2D2D]">
               {card.isCurrency === false
                 ? card.value
                 : `$${card.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
@@ -205,115 +215,110 @@ export default function Dashboard() {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
-        <div className="bg-white rounded-xl border border-gray-200 p-4 lg:p-5">
-          <h3 className="text-base lg:text-lg font-semibold text-gray-700 mb-4">
-            Weekly Breakdown
-          </h3>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={stats.weeklyData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="name" fontSize={12} />
-              <YAxis fontSize={12} tickFormatter={(v) => `$${v}`} />
-              <Tooltip
-                formatter={(value) => `$${Number(value).toFixed(2)}`}
-              />
-              <Bar dataKey="Income" fill="#22c55e" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="Expenses" fill="#ef4444" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div className="bg-white rounded-xl border border-gray-200 p-4 lg:p-5">
-          <h3 className="text-base lg:text-lg font-semibold text-gray-700 mb-4">
-            Expenses by Category
-          </h3>
-          <ResponsiveContainer width="100%" height={280}>
-            <PieChart>
-              <Pie
-                data={stats.categoryData}
-                cx="50%"
-                cy="45%"
-                innerRadius={50}
-                outerRadius={85}
-                paddingAngle={2}
-                dataKey="value"
-              >
-                {stats.categoryData.map((entry) => (
-                  <Cell
-                    key={entry.name}
-                    fill={CATEGORY_COLORS[entry.name] ?? "#94a3b8"}
-                  />
-                ))}
-              </Pie>
-              <Tooltip formatter={(value) => `$${Number(value).toFixed(2)}`} />
-              <Legend />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
+      <div className="bg-white rounded-2xl border border-[#E8E2DA] p-4">
+        <h3 className="text-sm font-semibold text-[#2D2D2D] mb-3">
+          Weekly Breakdown
+        </h3>
+        <ResponsiveContainer width="100%" height={220}>
+          <BarChart data={stats.weeklyData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#E8E2DA" />
+            <XAxis dataKey="name" fontSize={11} tick={{ fill: "#8B8578" }} />
+            <YAxis fontSize={11} tickFormatter={(v) => `$${v}`} tick={{ fill: "#8B8578" }} />
+            <Tooltip
+              formatter={(value) => `$${Number(value).toFixed(2)}`}
+              contentStyle={{
+                borderRadius: 12,
+                border: "1px solid #E8E2DA",
+                fontSize: 12,
+                boxShadow: "0 4px 12px rgba(0,0,0,0.05)",
+              }}
+            />
+            <Bar dataKey="Income" fill="#6B9B7A" radius={[6, 6, 0, 0]} />
+            <Bar dataKey="Expenses" fill="#C4756E" radius={[6, 6, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 p-5">
-        <h3 className="text-lg font-semibold text-gray-700 mb-4">
-          Recent Transactions
+      <div className="bg-white rounded-2xl border border-[#E8E2DA] p-4">
+        <h3 className="text-sm font-semibold text-[#2D2D2D] mb-3">
+          Spending by Category
         </h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-100">
-                <th className="text-left py-2 px-3 text-gray-500 font-medium">
-                  Date
-                </th>
-                <th className="text-left py-2 px-3 text-gray-500 font-medium">
-                  Description
-                </th>
-                <th className="text-left py-2 px-3 text-gray-500 font-medium">
-                  Category
-                </th>
-                <th className="text-right py-2 px-3 text-gray-500 font-medium">
-                  Amount
-                </th>
-                <th className="text-right py-2 px-3 text-gray-500 font-medium">
-                  Balance
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {stats.recentTx.map((tx) => (
-                <tr
-                  key={tx.id}
-                  className="border-b border-gray-50 hover:bg-gray-50"
-                >
-                  <td className="py-2 px-3 text-gray-600">{tx.date}</td>
-                  <td className="py-2 px-3 text-gray-800 font-medium">
-                    {tx.description}
-                  </td>
-                  <td className="py-2 px-3">
-                    <span
-                      className="px-2 py-0.5 rounded-full text-xs font-medium"
-                      style={{
-                        backgroundColor:
-                          (CATEGORY_COLORS[tx.category] ?? "#94a3b8") + "20",
-                        color: CATEGORY_COLORS[tx.category] ?? "#94a3b8",
-                      }}
-                    >
-                      {tx.category}
-                    </span>
-                  </td>
-                  <td
-                    className={`py-2 px-3 text-right font-medium ${
-                      tx.amount >= 0 ? "text-green-600" : "text-red-600"
-                    }`}
-                  >
-                    {tx.amount >= 0 ? "+" : ""}${Math.abs(tx.amount).toFixed(2)}
-                  </td>
-                  <td className="py-2 px-3 text-right text-gray-600">
-                    ${tx.balance.toFixed(2)}
-                  </td>
-                </tr>
+        <ResponsiveContainer width="100%" height={240}>
+          <PieChart>
+            <Pie
+              data={stats.categoryData}
+              cx="50%"
+              cy="45%"
+              innerRadius={45}
+              outerRadius={75}
+              paddingAngle={3}
+              dataKey="value"
+            >
+              {stats.categoryData.map((entry) => (
+                <Cell
+                  key={entry.name}
+                  fill={CATEGORY_COLORS[entry.name] ?? "#B5AFA6"}
+                />
               ))}
-            </tbody>
-          </table>
+            </Pie>
+            <Tooltip
+              formatter={(value) => `$${Number(value).toFixed(2)}`}
+              contentStyle={{
+                borderRadius: 12,
+                border: "1px solid #E8E2DA",
+                fontSize: 12,
+              }}
+            />
+            <Legend
+              wrapperStyle={{ fontSize: 11 }}
+              formatter={(value) => (
+                <span style={{ color: "#8B8578" }}>{value}</span>
+              )}
+            />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-[#E8E2DA] p-4">
+        <h3 className="text-sm font-semibold text-[#2D2D2D] mb-3">
+          Recent Activity
+        </h3>
+        <div className="space-y-3">
+          {stats.recentTx.map((tx) => (
+            <div key={tx.id} className="flex items-center justify-between">
+              <div className="flex items-center gap-3 min-w-0">
+                <div
+                  className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+                  style={{
+                    backgroundColor:
+                      (CATEGORY_COLORS[tx.category] ?? "#B5AFA6") + "18",
+                  }}
+                >
+                  <span
+                    className="text-xs font-bold"
+                    style={{
+                      color: CATEGORY_COLORS[tx.category] ?? "#B5AFA6",
+                    }}
+                  >
+                    {tx.category.charAt(0)}
+                  </span>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-[#2D2D2D] truncate">
+                    {tx.description}
+                  </p>
+                  <p className="text-xs text-[#B5AFA6]">{tx.date}</p>
+                </div>
+              </div>
+              <span
+                className={`text-sm font-semibold shrink-0 ml-3 ${
+                  tx.amount >= 0 ? "text-[#6B9B7A]" : "text-[#C4756E]"
+                }`}
+              >
+                {tx.amount >= 0 ? "+" : "-"}${Math.abs(tx.amount).toFixed(2)}
+              </span>
+            </div>
+          ))}
         </div>
       </div>
     </div>

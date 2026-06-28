@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { AppProvider } from "@/lib/store";
-import Sidebar from "@/components/Sidebar";
+import BottomNav from "@/components/BottomNav";
 import Dashboard from "@/components/Dashboard";
 import TransactionsView from "@/components/TransactionsView";
 import GoalsView from "@/components/GoalsView";
@@ -20,21 +20,17 @@ const VIEWS: Record<AppView, React.ComponentType> = {
 
 export default function Home() {
   const [view, setView] = useState<AppView>("dashboard");
-  const [mobileOpen, setMobileOpen] = useState(false);
   const View = VIEWS[view];
 
   return (
     <AppProvider>
-      <div className="flex h-screen overflow-hidden">
-        <Sidebar
-          current={view}
-          onNavigate={setView}
-          mobileOpen={mobileOpen}
-          onToggleMobile={() => setMobileOpen((o) => !o)}
-        />
-        <main className="flex-1 overflow-y-auto pt-14 lg:pt-0 p-4 lg:p-8">
-          <View />
+      <div className="flex flex-col h-screen">
+        <main className="flex-1 overflow-y-auto safe-top">
+          <div className="max-w-2xl mx-auto px-4 pt-3 pb-28 lg:px-6 lg:pt-6">
+            <View />
+          </div>
         </main>
+        <BottomNav current={view} onNavigate={setView} />
       </div>
     </AppProvider>
   );
