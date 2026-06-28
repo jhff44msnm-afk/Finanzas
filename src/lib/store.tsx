@@ -4,6 +4,7 @@ import {
   createContext,
   useContext,
   useReducer,
+  useEffect,
   type ReactNode,
   type Dispatch,
 } from "react";
@@ -14,7 +15,6 @@ import type {
   InvestmentHolding,
   InsurancePolicy,
 } from "./types";
-import { MOCK_INVESTMENTS, MOCK_INSURANCE } from "./mock-data";
 
 interface AppState {
   transactions: Transaction[];
@@ -26,6 +26,7 @@ interface AppState {
 
 type Action =
   | { type: "ADD_TRANSACTIONS"; payload: Transaction[] }
+  | { type: "ADD_TRANSACTION"; payload: Transaction }
   | { type: "UPDATE_TRANSACTION"; payload: Transaction }
   | { type: "ADD_STATEMENT"; payload: Statement }
   | { type: "REMOVE_STATEMENT"; payload: string }
@@ -33,14 +34,26 @@ type Action =
   | { type: "UPDATE_GOAL"; payload: Goal }
   | { type: "DELETE_GOAL"; payload: string }
   | { type: "SET_INVESTMENTS"; payload: InvestmentHolding[] }
-  | { type: "SET_INSURANCE"; payload: InsurancePolicy[] };
+  | { type: "ADD_INVESTMENT"; payload: InvestmentHolding }
+  | { type: "DELETE_INVESTMENT"; payload: string }
+  | { type: "SET_INSURANCE"; payload: InsurancePolicy[] }
+  | { type: "ADD_INSURANCE"; payload: InsurancePolicy }
+  | { type: "DELETE_INSURANCE"; payload: string }
+  | { type: "LOAD_STATE"; payload: AppState };
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
+    case "LOAD_STATE":
+      return action.payload;
     case "ADD_TRANSACTIONS":
       return {
         ...state,
         transactions: [...state.transactions, ...action.payload],
+      };
+    case "ADD_TRANSACTION":
+      return {
+        ...state,
+        transactions: [...state.transactions, action.payload],
       };
     case "UPDATE_TRANSACTION":
       return {
@@ -78,51 +91,75 @@ function reducer(state: AppState, action: Action): AppState {
       };
     case "SET_INVESTMENTS":
       return { ...state, investments: action.payload };
+    case "ADD_INVESTMENT":
+      return {
+        ...state,
+        investments: [...state.investments, action.payload],
+      };
+    case "DELETE_INVESTMENT":
+      return {
+        ...state,
+        investments: state.investments.filter((i) => i.id !== action.payload),
+      };
     case "SET_INSURANCE":
       return { ...state, insurance: action.payload };
+    case "ADD_INSURANCE":
+      return {
+        ...state,
+        insurance: [...state.insurance, action.payload],
+      };
+    case "DELETE_INSURANCE":
+      return {
+        ...state,
+        insurance: state.insurance.filter((i) => i.id !== action.payload),
+      };
     default:
       return state;
   }
 }
 
-const initialState: AppState = {
+const STORAGE_KEY = "finanzas-app-state";
+
+const emptyState: AppState = {
   transactions: [],
   statements: [],
-  goals: [
-    {
-      id: "g1",
-      name: "Emergency Fund",
-      targetAmount: 5000,
-      currentAmount: 1200,
-      deadline: "2026-12-31",
-      color: "#3b82f6",
-    },
-    {
-      id: "g2",
-      name: "Vacation",
-      targetAmount: 3000,
-      currentAmount: 750,
-      deadline: "2026-09-01",
-      color: "#10b981",
-    },
-    {
-      id: "g3",
-      name: "New Laptop",
-      targetAmount: 1500,
-      currentAmount: 400,
-      deadline: "2026-08-15",
-      color: "#a855f7",
-    },
-  ],
-  investments: MOCK_INVESTMENTS,
-  insurance: MOCK_INSURANCE,
+  goals: [],
+  investments: [],
+  insurance: [],
 };
 
-const StateContext = createContext<AppState>(initialState);
+function loadState(): AppState {
+  if (typeof window === "undefined") return emptyState;
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) return JSON.parse(saved);
+  } catch {}
+  return emptyState;
+}
+
+function saveState(state: AppState) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch {}
+}
+
+const StateContext = createContext<AppState>(emptyState);
 const DispatchContext = createContext<Dispatch<Action>>(() => {});
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, initialState);
+  const [state, dispatch] = useReducer(reducer, emptyState);
+
+  useEffect(() => {
+    const loaded = loadState();
+    if (loaded.transactions.length > 0 || loaded.goals.length > 0 || loaded.investments.length > 0 || loaded.insurance.length > 0 || loaded.statements.length > 0) {
+      dispatch({ type: "LOAD_STATE", payload: loaded });
+    }
+  }, []);
+
+  useEffect(() => {
+    saveState(state);
+  }, [state]);
+
   return (
     <StateContext.Provider value={state}>
       <DispatchContext.Provider value={dispatch}>

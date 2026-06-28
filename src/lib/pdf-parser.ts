@@ -115,6 +115,7 @@ export async function parsePdfFile(
   const allTransactions: Transaction[] = [];
   const allText: string[] = [];
   let year = new Date().getFullYear();
+  let seqCounter = 0;
 
   for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
     const page = await pdf.getPage(pageNum);
@@ -161,6 +162,7 @@ export async function parsePdfFile(
           balance: parseFloat(parsed.balance.replace(/[,-]/g, "")),
           category: "Adjustments",
           statementId,
+          seq: seqCounter++,
         });
         continue;
       }
@@ -178,6 +180,7 @@ export async function parsePdfFile(
         balance,
         category: categorizeTransaction(parsed.description),
         statementId,
+        seq: seqCounter++,
       });
     }
   }
