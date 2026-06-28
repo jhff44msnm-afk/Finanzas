@@ -104,7 +104,7 @@ export async function parsePdfFile(
   file: File,
   statementId: string
 ): Promise<{ transactions: Transaction[]; text: string }> {
-  const pdfjsLib = await import("pdfjs-dist");
+  const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const base =
     typeof window !== "undefined" && window.location.pathname.startsWith("/Finanzas")
       ? "/Finanzas"
@@ -112,7 +112,7 @@ export async function parsePdfFile(
   pdfjsLib.GlobalWorkerOptions.workerSrc = `${base}/pdf.worker.min.mjs`;
 
   const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
 
   const allTransactions: Transaction[] = [];
   const allText: string[] = [];
