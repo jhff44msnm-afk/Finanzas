@@ -20,13 +20,19 @@ const VIEWS: Record<AppView, React.ComponentType> = {
 
 export default function Home() {
   const [view, setView] = useState<AppView>("dashboard");
+  const [mobileOpen, setMobileOpen] = useState(false);
   const View = VIEWS[view];
 
   return (
     <AppProvider>
       <div className="flex h-screen overflow-hidden">
-        <Sidebar current={view} onNavigate={setView} />
-        <main className="flex-1 overflow-y-auto p-6 lg:p-8">
+        <Sidebar
+          current={view}
+          onNavigate={setView}
+          mobileOpen={mobileOpen}
+          onToggleMobile={() => setMobileOpen((o) => !o)}
+        />
+        <main className="flex-1 overflow-y-auto pt-14 lg:pt-0 p-4 lg:p-8">
           <View />
         </main>
       </div>
