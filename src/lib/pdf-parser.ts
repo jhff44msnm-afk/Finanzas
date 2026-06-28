@@ -105,7 +105,11 @@ export async function parsePdfFile(
   statementId: string
 ): Promise<{ transactions: Transaction[]; text: string }> {
   const pdfjsLib = await import("pdfjs-dist");
-  pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+  const base =
+    typeof window !== "undefined" && window.location.pathname.startsWith("/Finanzas")
+      ? "/Finanzas"
+      : "";
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `${base}/pdf.worker.min.mjs`;
 
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
