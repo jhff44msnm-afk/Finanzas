@@ -179,9 +179,9 @@ export default function Dashboard() {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <h3 className="text-lg font-semibold text-gray-700 mb-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
+        <div className="bg-white rounded-xl border border-gray-200 p-4 lg:p-5">
+          <h3 className="text-base lg:text-lg font-semibold text-gray-700 mb-4">
             Weekly Breakdown
           </h3>
           <ResponsiveContainer width="100%" height={300}>
@@ -198,25 +198,20 @@ export default function Dashboard() {
           </ResponsiveContainer>
         </div>
 
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <h3 className="text-lg font-semibold text-gray-700 mb-4">
+        <div className="bg-white rounded-xl border border-gray-200 p-4 lg:p-5">
+          <h3 className="text-base lg:text-lg font-semibold text-gray-700 mb-4">
             Expenses by Category
           </h3>
-          <ResponsiveContainer width="100%" height={300}>
+          <ResponsiveContainer width="100%" height={280}>
             <PieChart>
               <Pie
                 data={stats.categoryData}
                 cx="50%"
-                cy="50%"
-                innerRadius={60}
-                outerRadius={100}
+                cy="45%"
+                innerRadius={50}
+                outerRadius={85}
                 paddingAngle={2}
                 dataKey="value"
-                label={({ name, percent }) =>
-                  `${name} ${((percent ?? 0) * 100).toFixed(0)}%`
-                }
-                labelLine={false}
-                fontSize={11}
               >
                 {stats.categoryData.map((entry) => (
                   <Cell
