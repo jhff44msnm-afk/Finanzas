@@ -20,7 +20,6 @@ export default function StatementsView() {
         setError("Please upload a PDF file.");
         return;
       }
-
       setUploading(true);
       setError(null);
       setSuccess(null);
@@ -30,16 +29,12 @@ export default function StatementsView() {
         const { transactions, text } = await parsePdfFile(file, statementId);
 
         if (transactions.length === 0) {
-          setError(
-            "Could not parse any transactions from this PDF. Make sure it is a bank statement."
-          );
+          setError("Could not parse any transactions from this PDF. Make sure it is a bank statement.");
           setUploading(false);
           return;
         }
 
-        const yearMatch = text.match(
-          /Statement\s+from\s+\d{2}\/\d{2}\/(\d{2,4})/i
-        );
+        const yearMatch = text.match(/Statement\s+from\s+\d{2}\/\d{2}\/(\d{2,4})/i);
         let year = new Date().getFullYear();
         if (yearMatch) {
           year = parseInt(yearMatch[1]);
@@ -61,13 +56,9 @@ export default function StatementsView() {
 
         dispatch({ type: "ADD_TRANSACTIONS", payload: transactions });
 
-        setSuccess(
-          `Successfully imported ${transactions.length} transactions from "${file.name}".`
-        );
+        setSuccess(`Imported ${transactions.length} transactions from "${file.name}".`);
       } catch (err) {
-        setError(
-          `Failed to process PDF: ${err instanceof Error ? err.message : "Unknown error"}`
-        );
+        setError(`Failed to process PDF: ${err instanceof Error ? err.message : "Unknown error"}`);
       } finally {
         setUploading(false);
       }
@@ -95,111 +86,97 @@ export default function StatementsView() {
   };
 
   return (
-    <div className="space-y-6">
-      <h2 className="text-2xl font-bold text-gray-800">Bank Statements</h2>
+    <div className="space-y-5">
+      <h2 className="text-xl font-bold text-[#2D2D2D]">Uploads</h2>
 
       <div
-        className={`border-2 border-dashed rounded-xl p-10 text-center transition-colors ${
+        className={`border-2 border-dashed rounded-2xl p-8 text-center transition-colors ${
           dragOver
-            ? "border-blue-500 bg-blue-50"
-            : "border-gray-300 hover:border-gray-400"
+            ? "border-[#7C8C6E] bg-[#7C8C6E]/5"
+            : "border-[#E8E2DA] hover:border-[#B5AFA6]"
         }`}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragOver(true);
-        }}
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
       >
         {uploading ? (
           <div className="flex flex-col items-center gap-3">
-            <Loader2 size={40} className="text-blue-500 animate-spin" />
-            <p className="text-gray-600">Processing your statement...</p>
+            <Loader2 size={36} className="text-[#7C8C6E] animate-spin" />
+            <p className="text-[#8B8578] text-sm">Processing your statement...</p>
           </div>
         ) : (
           <div className="flex flex-col items-center gap-3">
-            <Upload size={40} className="text-gray-400" />
-            <div>
-              <p className="text-gray-600 font-medium">
-                Drag and drop your bank statement PDF here
-              </p>
-              <p className="text-gray-400 text-sm mt-1">
-                or click to browse files
-              </p>
+            <div className="w-14 h-14 rounded-full bg-[#7C8C6E]/10 flex items-center justify-center">
+              <Upload size={24} className="text-[#7C8C6E]" />
             </div>
-            <label className="mt-2 bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 cursor-pointer transition-colors">
+            <div>
+              <p className="text-[#2D2D2D] font-medium text-sm">
+                Drop your bank statement PDF here
+              </p>
+              <p className="text-[#B5AFA6] text-xs mt-1">or tap to browse files</p>
+            </div>
+            <label className="mt-1 bg-[#7C8C6E] text-white px-5 py-2 rounded-xl text-sm font-medium hover:bg-[#6B7A5E] cursor-pointer transition-colors">
               Select PDF
-              <input
-                type="file"
-                accept=".pdf"
-                onChange={handleFileChange}
-                className="hidden"
-              />
+              <input type="file" accept=".pdf" onChange={handleFileChange} className="hidden" />
             </label>
           </div>
         )}
       </div>
 
       {error && (
-        <div className="flex items-center gap-3 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+        <div className="flex items-center gap-3 bg-[#C4756E]/8 border border-[#C4756E]/20 text-[#C4756E] px-4 py-3 rounded-xl text-sm">
           <AlertCircle size={18} />
           {error}
         </div>
       )}
 
       {success && (
-        <div className="flex items-center gap-3 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm">
+        <div className="flex items-center gap-3 bg-[#6B9B7A]/8 border border-[#6B9B7A]/20 text-[#6B9B7A] px-4 py-3 rounded-xl text-sm">
           <CheckCircle2 size={18} />
           {success}
         </div>
       )}
 
       {statements.length > 0 && (
-        <div className="space-y-3">
-          <h3 className="text-lg font-semibold text-gray-700">
-            Uploaded Statements
-          </h3>
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-[#2D2D2D]">Uploaded Statements</h3>
           {statements.map((stmt) => (
             <div
               key={stmt.id}
-              className="bg-white rounded-xl border border-gray-200 p-4 flex items-center justify-between"
+              className="bg-white rounded-2xl border border-[#E8E2DA] p-4 flex items-center justify-between"
             >
-              <div className="flex items-center gap-4">
-                <div className="bg-blue-50 p-3 rounded-lg">
-                  <FileText size={24} className="text-blue-600" />
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 bg-[#7C8C6E]/10 rounded-xl flex items-center justify-center shrink-0">
+                  <FileText size={20} className="text-[#7C8C6E]" />
                 </div>
-                <div>
-                  <p className="font-medium text-gray-800">{stmt.fileName}</p>
-                  <div className="flex gap-4 text-sm text-gray-500 mt-1">
+                <div className="min-w-0">
+                  <p className="font-medium text-[#2D2D2D] text-sm truncate">{stmt.fileName}</p>
+                  <div className="flex flex-wrap gap-x-3 text-xs text-[#B5AFA6] mt-0.5">
                     {stmt.periodStart && stmt.periodEnd && (
-                      <span>
-                        Period: {stmt.periodStart} to {stmt.periodEnd}
-                      </span>
+                      <span>{stmt.periodStart} to {stmt.periodEnd}</span>
                     )}
                     <span>{stmt.transactionCount} transactions</span>
-                    <span>Uploaded: {stmt.uploadDate}</span>
                   </div>
                 </div>
               </div>
               <button
                 onClick={() => removeStatement(stmt.id)}
-                className="text-gray-300 hover:text-red-500 transition-colors p-2 rounded-lg hover:bg-red-50"
+                className="text-[#B5AFA6] hover:text-[#C4756E] transition-colors p-2 rounded-lg hover:bg-[#C4756E]/10 shrink-0"
               >
-                <Trash2 size={18} />
+                <Trash2 size={16} />
               </button>
             </div>
           ))}
         </div>
       )}
 
-      <div className="bg-gray-50 rounded-xl border border-gray-200 p-5">
-        <h3 className="text-sm font-semibold text-gray-600 mb-2">
+      <div className="bg-white rounded-2xl border border-[#E8E2DA] p-4">
+        <h3 className="text-xs font-semibold text-[#8B8578] uppercase tracking-wider mb-2">
           Supported Format
         </h3>
-        <p className="text-sm text-gray-500">
+        <p className="text-xs text-[#B5AFA6] leading-relaxed">
           Currently supports GECU Federal Credit Union member statements in PDF format.
           The parser reads Date, Description, Amount, and Balance columns automatically.
-          Transactions are categorized based on the description.
         </p>
       </div>
     </div>

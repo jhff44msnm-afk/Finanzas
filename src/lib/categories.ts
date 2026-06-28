@@ -41,16 +41,16 @@ export const CATEGORIES = [
 ];
 
 export const CATEGORY_COLORS: Record<string, string> = {
-  "Food & Dining": "#ef4444",
-  Transportation: "#f97316",
-  Entertainment: "#a855f7",
-  Shopping: "#ec4899",
-  "Bills & Subscriptions": "#3b82f6",
-  Insurance: "#06b6d4",
-  Transfers: "#6b7280",
-  Fees: "#78716c",
-  Adjustments: "#84cc16",
-  Payment: "#22c55e",
-  Income: "#10b981",
-  Other: "#94a3b8",
+  "Food & Dining": "#C4756E",
+  Transportation: "#D4A76A",
+  Entertainment: "#9B7EB5",
+  Shopping: "#C48B9F",
+  "Bills & Subscriptions": "#7C8C6E",
+  Insurance: "#6BA3A0",
+  Transfers: "#8B8578",
+  Fees: "#A89585",
+  Adjustments: "#8B9F6B",
+  Payment: "#6B9B7A",
+  Income: "#6B9B7A",
+  Other: "#B5AFA6",
 };
