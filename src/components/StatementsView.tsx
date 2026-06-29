@@ -26,7 +26,7 @@ export default function StatementsView() {
 
       try {
         const statementId = uuidv4();
-        const { transactions, text } = await parsePdfFile(file, statementId);
+        const { transactions, text, year } = await parsePdfFile(file, statementId);
 
         if (transactions.length === 0) {
           setError("Could not parse any transactions from this PDF. Make sure it is a bank statement.");
@@ -34,12 +34,6 @@ export default function StatementsView() {
           return;
         }
 
-        const yearMatch = text.match(/Statement\s+from\s+\d{2}\/\d{2}\/(\d{2,4})/i);
-        let year = new Date().getFullYear();
-        if (yearMatch) {
-          year = parseInt(yearMatch[1]);
-          if (year < 100) year += 2000;
-        }
         const period = detectStatementPeriod(text, year);
 
         dispatch({
