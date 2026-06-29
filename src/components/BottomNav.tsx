@@ -6,12 +6,14 @@ import {
   Target,
   TrendingUp,
   FileUp,
+  CalendarCheck,
 } from "lucide-react";
 import type { AppView } from "@/lib/types";
 
 const NAV_ITEMS: { view: AppView; label: string; icon: typeof Home }[] = [
   { view: "dashboard", label: "Home", icon: Home },
   { view: "transactions", label: "Activity", icon: ArrowLeftRight },
+  { view: "budget", label: "Budget", icon: CalendarCheck },
   { view: "goals", label: "Goals", icon: Target },
   { view: "investments", label: "Invest", icon: TrendingUp },
   { view: "statements", label: "Uploads", icon: FileUp },
@@ -33,7 +35,7 @@ export default function BottomNav({
             <button
               key={view}
               onClick={() => onNavigate(view)}
-              className="flex flex-col items-center justify-center gap-0.5 min-w-[56px] transition-colors"
+              className="flex flex-col items-center justify-center gap-0.5 min-w-[48px] transition-colors"
             >
               <div
                 className={`p-1.5 rounded-2xl transition-all duration-200 ${

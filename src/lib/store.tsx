@@ -14,6 +14,8 @@ import type {
   Goal,
   InvestmentHolding,
   InsurancePolicy,
+  RecurringBill,
+  BillPayment,
 } from "./types";
 
 interface AppState {
@@ -22,6 +24,8 @@ interface AppState {
   goals: Goal[];
   investments: InvestmentHolding[];
   insurance: InsurancePolicy[];
+  bills: RecurringBill[];
+  billPayments: BillPayment[];
 }
 
 type Action =
@@ -39,6 +43,10 @@ type Action =
   | { type: "SET_INSURANCE"; payload: InsurancePolicy[] }
   | { type: "ADD_INSURANCE"; payload: InsurancePolicy }
   | { type: "DELETE_INSURANCE"; payload: string }
+  | { type: "ADD_BILL"; payload: RecurringBill }
+  | { type: "UPDATE_BILL"; payload: RecurringBill }
+  | { type: "DELETE_BILL"; payload: string }
+  | { type: "ADD_BILL_PAYMENT"; payload: BillPayment }
   | { type: "LOAD_STATE"; payload: AppState };
 
 function reducer(state: AppState, action: Action): AppState {
@@ -113,6 +121,28 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         insurance: state.insurance.filter((i) => i.id !== action.payload),
       };
+    case "ADD_BILL":
+      return { ...state, bills: [...state.bills, action.payload] };
+    case "UPDATE_BILL":
+      return {
+        ...state,
+        bills: state.bills.map((b) =>
+          b.id === action.payload.id ? action.payload : b
+        ),
+      };
+    case "DELETE_BILL":
+      return {
+        ...state,
+        bills: state.bills.filter((b) => b.id !== action.payload),
+        billPayments: state.billPayments.filter(
+          (p) => p.billId !== action.payload
+        ),
+      };
+    case "ADD_BILL_PAYMENT":
+      return {
+        ...state,
+        billPayments: [...state.billPayments, action.payload],
+      };
     default:
       return state;
   }
@@ -126,13 +156,18 @@ const emptyState: AppState = {
   goals: [],
   investments: [],
   insurance: [],
+  bills: [],
+  billPayments: [],
 };
 
 function loadState(): AppState {
   if (typeof window === "undefined") return emptyState;
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      return { ...emptyState, ...parsed };
+    }
   } catch {}
   return emptyState;
 }
@@ -151,7 +186,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const loaded = loadState();
-    if (loaded.transactions.length > 0 || loaded.goals.length > 0 || loaded.investments.length > 0 || loaded.insurance.length > 0 || loaded.statements.length > 0) {
+    if (loaded.transactions.length > 0 || loaded.goals.length > 0 || loaded.investments.length > 0 || loaded.insurance.length > 0 || loaded.statements.length > 0 || loaded.bills?.length > 0) {
       dispatch({ type: "LOAD_STATE", payload: loaded });
     }
   }, []);

@@ -47,9 +47,28 @@ export interface InsurancePolicy {
   nextPaymentDate: string;
 }
 
+export interface RecurringBill {
+  id: string;
+  name: string;
+  amount: number;
+  frequency: "weekly" | "biweekly" | "monthly";
+  dueDay: number;
+  category: string;
+}
+
+export interface BillPayment {
+  id: string;
+  billId: string;
+  paidDate: string;
+  dueDate: string;
+  amount: number;
+  onTime: boolean;
+}
+
 export type AppView =
   | "dashboard"
   | "transactions"
   | "goals"
   | "investments"
-  | "statements";
+  | "statements"
+  | "budget";

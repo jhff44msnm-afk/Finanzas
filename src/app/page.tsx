@@ -8,11 +8,13 @@ import TransactionsView from "@/components/TransactionsView";
 import GoalsView from "@/components/GoalsView";
 import InvestmentsView from "@/components/InvestmentsView";
 import StatementsView from "@/components/StatementsView";
+import BudgetView from "@/components/BudgetView";
 import type { AppView } from "@/lib/types";
 
 const VIEWS: Record<AppView, React.ComponentType> = {
   dashboard: Dashboard,
   transactions: TransactionsView,
+  budget: BudgetView,
   goals: GoalsView,
   investments: InvestmentsView,
   statements: StatementsView,
