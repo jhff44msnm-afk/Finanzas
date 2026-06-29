@@ -199,6 +199,7 @@ export async function parsePdfFile(
           category: "Adjustments",
           statementId,
           seq: seqCounter++,
+          source: "statement",
         });
         continue;
       }
@@ -217,6 +218,7 @@ export async function parsePdfFile(
         category: categorizeTransaction(parsed.description),
         statementId,
         seq: seqCounter++,
+        source: "statement",
       });
     }
   }

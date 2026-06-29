@@ -16,9 +16,12 @@ import type {
   InsurancePolicy,
   RecurringBill,
   BillPayment,
+  Account,
 } from "./types";
 
 interface AppState {
+  accounts: Account[];
+  activeAccountId: string;
   transactions: Transaction[];
   statements: Statement[];
   goals: Goal[];
@@ -29,9 +32,14 @@ interface AppState {
 }
 
 type Action =
+  | { type: "ADD_ACCOUNT"; payload: Account }
+  | { type: "UPDATE_ACCOUNT"; payload: Account }
+  | { type: "DELETE_ACCOUNT"; payload: string }
+  | { type: "SET_ACTIVE_ACCOUNT"; payload: string }
   | { type: "ADD_TRANSACTIONS"; payload: Transaction[] }
   | { type: "ADD_TRANSACTION"; payload: Transaction }
   | { type: "UPDATE_TRANSACTION"; payload: Transaction }
+  | { type: "DELETE_TRANSACTION"; payload: string }
   | { type: "ADD_STATEMENT"; payload: Statement }
   | { type: "REMOVE_STATEMENT"; payload: string }
   | { type: "ADD_GOAL"; payload: Goal }
@@ -53,6 +61,33 @@ function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "LOAD_STATE":
       return action.payload;
+    case "ADD_ACCOUNT":
+      return { ...state, accounts: [...state.accounts, action.payload] };
+    case "UPDATE_ACCOUNT":
+      return {
+        ...state,
+        accounts: state.accounts.map((a) =>
+          a.id === action.payload.id ? action.payload : a
+        ),
+      };
+    case "DELETE_ACCOUNT":
+      return {
+        ...state,
+        accounts: state.accounts.filter((a) => a.id !== action.payload),
+        transactions: state.transactions.filter(
+          (t) => t.accountId !== action.payload
+        ),
+        statements: state.statements.filter(
+          (s) => s.accountId !== action.payload
+        ),
+        bills: state.bills.filter((b) => b.accountId !== action.payload),
+        activeAccountId:
+          state.activeAccountId === action.payload
+            ? state.accounts.find((a) => a.id !== action.payload)?.id ?? "all"
+            : state.activeAccountId,
+      };
+    case "SET_ACTIVE_ACCOUNT":
+      return { ...state, activeAccountId: action.payload };
     case "ADD_TRANSACTIONS":
       return {
         ...state,
@@ -68,6 +103,13 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         transactions: state.transactions.map((t) =>
           t.id === action.payload.id ? action.payload : t
+        ),
+      };
+    case "DELETE_TRANSACTION":
+      return {
+        ...state,
+        transactions: state.transactions.filter(
+          (t) => t.id !== action.payload
         ),
       };
     case "ADD_STATEMENT":
@@ -151,6 +193,8 @@ function reducer(state: AppState, action: Action): AppState {
 const STORAGE_KEY = "finanzas-app-state";
 
 const emptyState: AppState = {
+  accounts: [],
+  activeAccountId: "all",
   transactions: [],
   statements: [],
   goals: [],
@@ -186,7 +230,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const loaded = loadState();
-    if (loaded.transactions.length > 0 || loaded.goals.length > 0 || loaded.investments.length > 0 || loaded.insurance.length > 0 || loaded.statements.length > 0 || loaded.bills?.length > 0) {
+    if (
+      loaded.transactions.length > 0 ||
+      loaded.goals.length > 0 ||
+      loaded.investments.length > 0 ||
+      loaded.insurance.length > 0 ||
+      loaded.statements.length > 0 ||
+      loaded.bills?.length > 0 ||
+      loaded.accounts?.length > 0
+    ) {
       dispatch({ type: "LOAD_STATE", payload: loaded });
     }
   }, []);

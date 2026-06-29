@@ -1,11 +1,15 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import {
   TrendingDown,
   TrendingUp,
   ArrowLeftRight,
   Wallet,
+  Landmark,
+  Copy,
+  Check,
+  RefreshCw,
 } from "lucide-react";
 import {
   BarChart,
@@ -22,14 +26,156 @@ import {
 } from "recharts";
 import { useAppState } from "@/lib/store";
 import { CATEGORY_COLORS } from "@/lib/categories";
+import { formatCurrency, currencySymbol, getUsdMxnRate } from "@/lib/currency";
 
 function getWeekNumber(dateStr: string): number {
   const d = new Date(dateStr);
   return Math.ceil(d.getDate() / 7);
 }
 
+function AccountInfoCard() {
+  const { accounts, activeAccountId } = useAppState();
+  const [copied, setCopied] = useState<string | null>(null);
+  const [usdRate, setUsdRate] = useState<number | null>(null);
+
+  const account = accounts.find((a) => a.id === activeAccountId);
+
+  useEffect(() => {
+    if (account?.currency === "MXN") {
+      getUsdMxnRate().then(setUsdRate);
+    }
+  }, [account?.currency]);
+
+  if (!account) return null;
+
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text).catch(() => {});
+    setCopied(label);
+    setTimeout(() => setCopied(null), 2000);
+  };
+
+  const isMx = account.type === "mx";
+  const accent = isMx ? "#006847" : "#7C8C6E";
+
+  return (
+    <div
+      className="bg-white rounded-2xl border border-[#E8E2DA] p-4 space-y-3"
+    >
+      <div className="flex items-center gap-2.5">
+        <div
+          className="w-9 h-9 rounded-xl flex items-center justify-center"
+          style={{ backgroundColor: accent + "15" }}
+        >
+          <Landmark size={18} style={{ color: accent }} />
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-[#2D2D2D]">{account.bankName}</p>
+          <p className="text-[10px] text-[#B5AFA6]">{account.name} &middot; {account.currency}</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        {isMx ? (
+          <>
+            {account.cuentaNumber && (
+              <InfoRow
+                label="No. de Cuenta"
+                value={account.cuentaNumber}
+                copied={copied}
+                onCopy={copyToClipboard}
+              />
+            )}
+            {account.clabeNumber && (
+              <InfoRow
+                label="No. Cuenta CLABE"
+                value={account.clabeNumber}
+                copied={copied}
+                onCopy={copyToClipboard}
+              />
+            )}
+          </>
+        ) : (
+          <>
+            {account.routingNumber && (
+              <InfoRow
+                label="Routing Number"
+                value={account.routingNumber}
+                copied={copied}
+                onCopy={copyToClipboard}
+              />
+            )}
+            {account.accountNumber && (
+              <InfoRow
+                label="Account Number"
+                value={account.accountNumber}
+                copied={copied}
+                onCopy={copyToClipboard}
+              />
+            )}
+          </>
+        )}
+      </div>
+
+      {isMx && usdRate && (
+        <div className="bg-[#006847]/5 rounded-xl px-3 py-2 flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <RefreshCw size={12} className="text-[#006847]" />
+            <span className="text-[10px] text-[#006847] font-medium">USD/MXN Rate</span>
+          </div>
+          <span className="text-xs font-bold text-[#006847]">
+            $1 USD = MX${usdRate.toFixed(2)}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InfoRow({
+  label,
+  value,
+  copied,
+  onCopy,
+}: {
+  label: string;
+  value: string;
+  copied: string | null;
+  onCopy: (text: string, label: string) => void;
+}) {
+  return (
+    <div className="col-span-2 flex items-center justify-between bg-[#F5F0EB] rounded-xl px-3 py-2">
+      <div>
+        <p className="text-[10px] text-[#8B8578] font-medium uppercase tracking-wider">{label}</p>
+        <p className="text-xs font-mono text-[#2D2D2D] mt-0.5">{value}</p>
+      </div>
+      <button
+        onClick={() => onCopy(value, label)}
+        className="p-1.5 text-[#B5AFA6] hover:text-[#7C8C6E] transition-colors"
+      >
+        {copied === label ? <Check size={14} className="text-[#6B9B7A]" /> : <Copy size={14} />}
+      </button>
+    </div>
+  );
+}
+
 export default function Dashboard() {
-  const { transactions } = useAppState();
+  const { transactions, accounts, activeAccountId } = useAppState();
+  const [usdRate, setUsdRate] = useState<number | null>(null);
+
+  const activeAccount = accounts.find((a) => a.id === activeAccountId);
+  const currency = activeAccount?.currency ?? "USD";
+  const sym = currencySymbol(currency);
+
+  const accountTransactions = useMemo(() => {
+    if (activeAccountId === "all") return transactions;
+    return transactions.filter((t) => t.accountId === activeAccountId || !t.accountId);
+  }, [transactions, activeAccountId]);
+
+  useEffect(() => {
+    if (activeAccount?.currency === "MXN" || activeAccountId === "all") {
+      getUsdMxnRate().then(setUsdRate);
+    }
+  }, [activeAccount?.currency, activeAccountId]);
 
   const greeting = useMemo(() => {
     const h = new Date().getHours();
@@ -39,7 +185,7 @@ export default function Dashboard() {
   }, []);
 
   const stats = useMemo(() => {
-    if (transactions.length === 0) {
+    if (accountTransactions.length === 0) {
       return {
         totalIncome: 0,
         totalExpenses: 0,
@@ -53,7 +199,7 @@ export default function Dashboard() {
       };
     }
 
-    const sorted = [...transactions].sort((a, b) => {
+    const sorted = [...accountTransactions].sort((a, b) => {
       const dateCmp = new Date(a.date).getTime() - new Date(b.date).getTime();
       if (dateCmp !== 0) return dateCmp;
       return (a.seq ?? 0) - (b.seq ?? 0);
@@ -126,15 +272,16 @@ export default function Dashboard() {
       currentBalance,
       currentMonth,
     };
-  }, [transactions]);
+  }, [accountTransactions]);
 
-  if (transactions.length === 0) {
+  if (accountTransactions.length === 0) {
     return (
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-bold text-[#2D2D2D]">{greeting}</h1>
           <p className="text-[#8B8578] text-sm mt-1">Welcome to Finanzas</p>
         </div>
+        {activeAccountId !== "all" && <AccountInfoCard />}
         <div className="flex items-center justify-center py-20">
           <div className="text-center">
             <div className="w-20 h-20 rounded-full bg-[#7C8C6E]/10 flex items-center justify-center mx-auto mb-4">
@@ -153,6 +300,11 @@ export default function Dashboard() {
     );
   }
 
+  const balanceInUsd =
+    currency === "MXN" && usdRate
+      ? stats.currentBalance / usdRate
+      : null;
+
   const statCards = [
     {
       label: "Balance",
@@ -160,6 +312,9 @@ export default function Dashboard() {
       icon: Wallet,
       iconColor: "#7C8C6E",
       iconBg: "bg-[#7C8C6E]/10",
+      subtitle: balanceInUsd !== null
+        ? `~$${balanceInUsd.toFixed(2)} USD`
+        : undefined,
     },
     {
       label: "Income",
@@ -194,6 +349,8 @@ export default function Dashboard() {
         )}
       </div>
 
+      {activeAccountId !== "all" && <AccountInfoCard />}
+
       <div className="grid grid-cols-2 gap-3">
         {statCards.map((card) => (
           <div
@@ -209,8 +366,11 @@ export default function Dashboard() {
             <p className="text-xl font-bold text-[#2D2D2D]">
               {card.isCurrency === false
                 ? card.value
-                : `$${card.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                : `${sym}${card.value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             </p>
+            {"subtitle" in card && card.subtitle && (
+              <p className="text-[10px] text-[#B5AFA6] mt-0.5">{card.subtitle}</p>
+            )}
           </div>
         ))}
       </div>
@@ -223,9 +383,9 @@ export default function Dashboard() {
           <BarChart data={stats.weeklyData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#E8E2DA" />
             <XAxis dataKey="name" fontSize={11} tick={{ fill: "#8B8578" }} />
-            <YAxis fontSize={11} tickFormatter={(v) => `$${v}`} tick={{ fill: "#8B8578" }} />
+            <YAxis fontSize={11} tickFormatter={(v) => `${sym}${v}`} tick={{ fill: "#8B8578" }} />
             <Tooltip
-              formatter={(value) => `$${Number(value).toFixed(2)}`}
+              formatter={(value) => `${sym}${Number(value).toFixed(2)}`}
               contentStyle={{
                 borderRadius: 12,
                 border: "1px solid #E8E2DA",
@@ -262,7 +422,7 @@ export default function Dashboard() {
               ))}
             </Pie>
             <Tooltip
-              formatter={(value) => `$${Number(value).toFixed(2)}`}
+              formatter={(value) => `${sym}${Number(value).toFixed(2)}`}
               contentStyle={{
                 borderRadius: 12,
                 border: "1px solid #E8E2DA",
@@ -284,41 +444,45 @@ export default function Dashboard() {
           Recent Activity
         </h3>
         <div className="space-y-3">
-          {stats.recentTx.map((tx) => (
-            <div key={tx.id} className="flex items-center justify-between">
-              <div className="flex items-center gap-3 min-w-0">
-                <div
-                  className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-                  style={{
-                    backgroundColor:
-                      (CATEGORY_COLORS[tx.category] ?? "#B5AFA6") + "18",
-                  }}
-                >
-                  <span
-                    className="text-xs font-bold"
+          {stats.recentTx.map((tx) => {
+            const txAccount = accounts.find((a) => a.id === tx.accountId);
+            const txSym = currencySymbol(txAccount?.currency ?? currency);
+            return (
+              <div key={tx.id} className="flex items-center justify-between">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div
+                    className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
                     style={{
-                      color: CATEGORY_COLORS[tx.category] ?? "#B5AFA6",
+                      backgroundColor:
+                        (CATEGORY_COLORS[tx.category] ?? "#B5AFA6") + "18",
                     }}
                   >
-                    {tx.category.charAt(0)}
-                  </span>
+                    <span
+                      className="text-xs font-bold"
+                      style={{
+                        color: CATEGORY_COLORS[tx.category] ?? "#B5AFA6",
+                      }}
+                    >
+                      {tx.category.charAt(0)}
+                    </span>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-[#2D2D2D] truncate">
+                      {tx.description}
+                    </p>
+                    <p className="text-xs text-[#B5AFA6]">{tx.date}</p>
+                  </div>
                 </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-[#2D2D2D] truncate">
-                    {tx.description}
-                  </p>
-                  <p className="text-xs text-[#B5AFA6]">{tx.date}</p>
-                </div>
+                <span
+                  className={`text-sm font-semibold shrink-0 ml-3 ${
+                    tx.amount >= 0 ? "text-[#6B9B7A]" : "text-[#C4756E]"
+                  }`}
+                >
+                  {tx.amount >= 0 ? "+" : "-"}{txSym}{Math.abs(tx.amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
               </div>
-              <span
-                className={`text-sm font-semibold shrink-0 ml-3 ${
-                  tx.amount >= 0 ? "text-[#6B9B7A]" : "text-[#C4756E]"
-                }`}
-              >
-                {tx.amount >= 0 ? "+" : "-"}${Math.abs(tx.amount).toFixed(2)}
-              </span>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
