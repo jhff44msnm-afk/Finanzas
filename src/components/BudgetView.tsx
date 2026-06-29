@@ -17,6 +17,9 @@ import {
   ShieldCheck,
   Zap,
   X,
+  Link2,
+  EyeOff,
+  Undo2,
 } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import { useAppState, useAppDispatch } from "@/lib/store";
@@ -102,19 +105,72 @@ function formatDate(d: Date): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+// --- Ignored items localStorage helpers ---
+
+const IGNORED_KEY = "finanzas-ignored-recurring";
+
+function loadIgnored(): Set<string> {
+  try {
+    const raw = localStorage.getItem(IGNORED_KEY);
+    if (raw) return new Set(JSON.parse(raw));
+  } catch {}
+  return new Set();
+}
+
+function saveIgnored(set: Set<string>) {
+  try {
+    localStorage.setItem(IGNORED_KEY, JSON.stringify([...set]));
+  } catch {}
+}
+
 // --- Detected Recurring Payments Section ---
+
+const DAYS_OF_WEEK = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+type PriorityFilter = "all" | Priority;
 
 function DetectedRecurring({
   transactions,
 }: {
   transactions: { description: string; amount: number; category: string; date: string }[];
 }) {
+  const dispatch = useAppDispatch();
+  const { bills } = useAppState();
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [filter, setFilter] = useState<PriorityFilter>("all");
+  const [ignored, setIgnored] = useState<Set<string>>(() => loadIgnored());
+  const [showIgnored, setShowIgnored] = useState(false);
+
+  const toggleIgnore = (key: string) => {
+    const next = new Set(ignored);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    setIgnored(next);
+    saveIgnored(next);
+  };
+
+  const linkToBills = (item: {
+    description: string;
+    avgAmount: number;
+    category: string;
+  }) => {
+    dispatch({
+      type: "ADD_BILL",
+      payload: {
+        id: uuidv4(),
+        name: item.description,
+        amount: Math.round(item.avgAmount * 100) / 100,
+        frequency: "monthly",
+        dueDay: 15,
+        category: item.category,
+      },
+    });
+  };
 
   const recurring = useMemo(() => {
     const groups = new Map<
       string,
-      { description: string; amounts: number[]; dates: string[]; category: string }
+      { key: string; description: string; amounts: number[]; dates: string[]; category: string }
     >();
 
     for (const tx of transactions) {
@@ -132,6 +188,7 @@ function DetectedRecurring({
         existing.dates.push(tx.date);
       } else {
         groups.set(key, {
+          key,
           description: tx.description,
           amounts: [Math.abs(tx.amount)],
           dates: [tx.date],
@@ -161,9 +218,22 @@ function DetectedRecurring({
       });
   }, [transactions]);
 
+  const activeItems = recurring.filter((r) => !ignored.has(r.key));
+  const ignoredItems = recurring.filter((r) => ignored.has(r.key));
+  const filteredItems =
+    filter === "all"
+      ? activeItems
+      : activeItems.filter((r) => r.priority === filter);
+
   const totalMonthly = useMemo(() => {
-    return recurring.reduce((sum, r) => sum + r.avgAmount, 0);
-  }, [recurring]);
+    return activeItems.reduce((sum, r) => sum + r.avgAmount, 0);
+  }, [activeItems]);
+
+  const linkedDescriptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const b of bills) set.add(b.name.toUpperCase());
+    return set;
+  }, [bills]);
 
   if (recurring.length === 0) {
     return (
@@ -177,12 +247,166 @@ function DetectedRecurring({
     );
   }
 
+  const filterButtons: { key: PriorityFilter; label: string; color: string }[] = [
+    { key: "all", label: "All", color: "#8B8578" },
+    { key: "Essential", label: "Essential", color: PRIORITY_CONFIG.Essential.color },
+    { key: "Important", label: "Important", color: PRIORITY_CONFIG.Important.color },
+    { key: "Discretionary", label: "Discretionary", color: PRIORITY_CONFIG.Discretionary.color },
+    {
+      key: "Potentially Unnecessary",
+      label: "Unnecessary",
+      color: PRIORITY_CONFIG["Potentially Unnecessary"].color,
+    },
+  ];
+
+  const renderItem = (
+    item: (typeof recurring)[0],
+    isIgnoredItem: boolean,
+  ) => {
+    const config = PRIORITY_CONFIG[item.priority];
+    const isLinked = linkedDescriptions.has(item.description.toUpperCase());
+    return (
+      <div
+        key={item.key}
+        className={`bg-white rounded-2xl border overflow-hidden ${
+          isIgnoredItem
+            ? "border-[#E8E2DA]/60 opacity-60"
+            : "border-[#E8E2DA]"
+        }`}
+      >
+        <button
+          onClick={() =>
+            setExpanded(expanded === item.key ? null : item.key)
+          }
+          className="w-full p-3.5 flex items-center justify-between text-left"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <div
+              className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+              style={{ backgroundColor: config.color + "18" }}
+            >
+              <span
+                className="text-xs font-bold"
+                style={{ color: config.color }}
+              >
+                {item.category.charAt(0)}
+              </span>
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-[#2D2D2D] truncate">
+                {item.description}
+              </p>
+              <div className="flex items-center gap-1.5">
+                <p className="text-[10px] text-[#B5AFA6]">
+                  {item.count}x &middot; {item.category}
+                </p>
+                {isLinked && (
+                  <span className="text-[10px] font-medium text-[#7C8C6E] bg-[#7C8C6E]/10 px-1.5 py-0.5 rounded-full">
+                    Linked
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 ml-2">
+            <span className="text-sm font-semibold text-[#C4756E]">
+              -${item.avgAmount.toFixed(2)}
+            </span>
+            {expanded === item.key ? (
+              <ChevronUp size={14} className="text-[#B5AFA6]" />
+            ) : (
+              <ChevronDown size={14} className="text-[#B5AFA6]" />
+            )}
+          </div>
+        </button>
+        {expanded === item.key && (
+          <div className="px-3.5 pb-3.5 border-t border-[#E8E2DA] pt-3 space-y-3">
+            <div>
+              <p className="text-[10px] text-[#8B8578] font-medium uppercase tracking-wider mb-2">
+                Payment History
+              </p>
+              <div className="space-y-1.5">
+                {item.dates
+                  .sort(
+                    (a, b) =>
+                      new Date(b).getTime() - new Date(a).getTime()
+                  )
+                  .slice(0, 6)
+                  .map((date, i) => (
+                    <div
+                      key={i}
+                      className="flex justify-between text-xs"
+                    >
+                      <span className="text-[#8B8578]">{date}</span>
+                      <span className="text-[#C4756E] font-medium">
+                        -${item.amounts[item.dates.indexOf(date)]?.toFixed(2)}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+
+            {item.priority === "Potentially Unnecessary" && (
+              <div className="bg-[#C4756E]/8 border border-[#C4756E]/20 rounded-xl p-2.5">
+                <p className="text-[10px] text-[#C4756E] font-medium">
+                  Cutting this saves ~$
+                  {(item.avgAmount * 12).toFixed(0)}/year
+                </p>
+              </div>
+            )}
+            {item.priority === "Discretionary" && (
+              <div className="bg-[#9B7EB5]/8 border border-[#9B7EB5]/20 rounded-xl p-2.5">
+                <p className="text-[10px] text-[#9B7EB5] font-medium">
+                  Consider if you still use this — $
+                  {(item.avgAmount * 12).toFixed(0)}/year
+                </p>
+              </div>
+            )}
+
+            {/* Action buttons */}
+            <div className="flex gap-2">
+              {!isIgnoredItem && !isLinked && (
+                <button
+                  onClick={() => linkToBills(item)}
+                  className="flex-1 flex items-center justify-center gap-1.5 bg-[#7C8C6E]/10 text-[#7C8C6E] py-2 rounded-xl text-xs font-medium hover:bg-[#7C8C6E]/20 transition-colors"
+                >
+                  <Link2 size={13} />
+                  Link to Bills
+                </button>
+              )}
+              <button
+                onClick={() => toggleIgnore(item.key)}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium transition-colors ${
+                  isIgnoredItem
+                    ? "bg-[#6B9B7A]/10 text-[#6B9B7A] hover:bg-[#6B9B7A]/20"
+                    : "bg-[#F5F0EB] text-[#8B8578] hover:bg-[#EDE7DF]"
+                }`}
+              >
+                {isIgnoredItem ? (
+                  <>
+                    <Undo2 size={13} />
+                    Restore
+                  </>
+                ) : (
+                  <>
+                    <EyeOff size={13} />
+                    Ignore
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-3">
       <div className="bg-white rounded-2xl border border-[#E8E2DA] p-4">
         <div className="flex justify-between items-center">
           <span className="text-xs text-[#8B8578] font-medium">
-            {recurring.length} recurring charges detected
+            {activeItems.length} recurring charges detected
           </span>
           <span className="text-sm font-bold text-[#C4756E]">
             ~${totalMonthly.toFixed(2)}/mo
@@ -190,115 +414,97 @@ function DetectedRecurring({
         </div>
       </div>
 
-      {(["Potentially Unnecessary", "Discretionary", "Important", "Essential"] as Priority[]).map(
-        (priority) => {
-          const items = recurring.filter((r) => r.priority === priority);
-          if (items.length === 0) return null;
-          const config = PRIORITY_CONFIG[priority];
-          const Icon = config.icon;
+      {/* Priority filter pills */}
+      <div className="flex gap-1.5 overflow-x-auto pb-1">
+        {filterButtons.map((btn) => {
+          const active = filter === btn.key;
+          const count =
+            btn.key === "all"
+              ? activeItems.length
+              : activeItems.filter((r) => r.priority === btn.key).length;
           return (
-            <div key={priority} className="space-y-2">
-              <div className="flex items-center gap-2 px-1">
-                <Icon size={14} style={{ color: config.color }} />
+            <button
+              key={btn.key}
+              onClick={() => setFilter(btn.key)}
+              className={`shrink-0 px-3 py-1.5 rounded-xl text-[11px] font-semibold transition-all border ${
+                active
+                  ? "text-white border-transparent"
+                  : "bg-white border-[#E8E2DA] text-[#8B8578] hover:border-[#B5AFA6]"
+              }`}
+              style={
+                active
+                  ? { backgroundColor: btn.color, borderColor: btn.color }
+                  : undefined
+              }
+            >
+              {btn.label}
+              {count > 0 && (
                 <span
-                  className="text-xs font-semibold uppercase tracking-wider"
-                  style={{ color: config.color }}
+                  className={`ml-1 ${active ? "opacity-80" : "opacity-50"}`}
                 >
-                  {config.label}
+                  {count}
                 </span>
-              </div>
-              {items.map((item) => (
-                <div
-                  key={item.description}
-                  className="bg-white rounded-2xl border border-[#E8E2DA] overflow-hidden"
-                >
-                  <button
-                    onClick={() =>
-                      setExpanded(
-                        expanded === item.description ? null : item.description
-                      )
-                    }
-                    className="w-full p-3.5 flex items-center justify-between text-left"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div
-                        className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-                        style={{ backgroundColor: config.color + "18" }}
-                      >
-                        <span
-                          className="text-xs font-bold"
-                          style={{ color: config.color }}
-                        >
-                          {item.category.charAt(0)}
-                        </span>
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-[#2D2D2D] truncate">
-                          {item.description}
-                        </p>
-                        <p className="text-[10px] text-[#B5AFA6]">
-                          {item.count}x charged &middot; {item.category}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0 ml-2">
-                      <span className="text-sm font-semibold text-[#C4756E]">
-                        -${item.avgAmount.toFixed(2)}
-                      </span>
-                      {expanded === item.description ? (
-                        <ChevronUp size={14} className="text-[#B5AFA6]" />
-                      ) : (
-                        <ChevronDown size={14} className="text-[#B5AFA6]" />
-                      )}
-                    </div>
-                  </button>
-                  {expanded === item.description && (
-                    <div className="px-3.5 pb-3.5 border-t border-[#E8E2DA] pt-3">
-                      <p className="text-[10px] text-[#8B8578] font-medium uppercase tracking-wider mb-2">
-                        Payment History
-                      </p>
-                      <div className="space-y-1.5">
-                        {item.dates
-                          .sort(
-                            (a, b) =>
-                              new Date(b).getTime() - new Date(a).getTime()
-                          )
-                          .slice(0, 6)
-                          .map((date, i) => (
-                            <div
-                              key={i}
-                              className="flex justify-between text-xs"
-                            >
-                              <span className="text-[#8B8578]">{date}</span>
-                              <span className="text-[#C4756E] font-medium">
-                                -${item.amounts[item.dates.indexOf(date)]?.toFixed(2)}
-                              </span>
-                            </div>
-                          ))}
-                      </div>
-                      {priority === "Potentially Unnecessary" && (
-                        <div className="mt-3 bg-[#C4756E]/8 border border-[#C4756E]/20 rounded-xl p-2.5">
-                          <p className="text-[10px] text-[#C4756E] font-medium">
-                            Cutting this saves ~$
-                            {(item.avgAmount * 12).toFixed(0)}/year
-                          </p>
-                        </div>
-                      )}
-                      {priority === "Discretionary" && (
-                        <div className="mt-3 bg-[#9B7EB5]/8 border border-[#9B7EB5]/20 rounded-xl p-2.5">
-                          <p className="text-[10px] text-[#9B7EB5] font-medium">
-                            Consider if you still use this — $
-                            {(item.avgAmount * 12).toFixed(0)}/year
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+              )}
+            </button>
           );
-        }
+        })}
+      </div>
+
+      {/* Active items grouped by priority */}
+      {filter === "all" ? (
+        (["Potentially Unnecessary", "Discretionary", "Important", "Essential"] as Priority[]).map(
+          (priority) => {
+            const items = filteredItems.filter((r) => r.priority === priority);
+            if (items.length === 0) return null;
+            const config = PRIORITY_CONFIG[priority];
+            const Icon = config.icon;
+            return (
+              <div key={priority} className="space-y-2">
+                <div className="flex items-center gap-2 px-1">
+                  <Icon size={14} style={{ color: config.color }} />
+                  <span
+                    className="text-xs font-semibold uppercase tracking-wider"
+                    style={{ color: config.color }}
+                  >
+                    {config.label}
+                  </span>
+                </div>
+                {items.map((item) => renderItem(item, false))}
+              </div>
+            );
+          }
+        )
+      ) : (
+        <div className="space-y-2">
+          {filteredItems.map((item) => renderItem(item, false))}
+          {filteredItems.length === 0 && (
+            <p className="text-center text-xs text-[#B5AFA6] py-6">
+              No items in this category.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Ignored section */}
+      {ignoredItems.length > 0 && (
+        <div className="space-y-2 pt-2">
+          <button
+            onClick={() => setShowIgnored(!showIgnored)}
+            className="flex items-center gap-2 px-1 w-full"
+          >
+            <EyeOff size={14} className="text-[#B5AFA6]" />
+            <span className="text-xs font-semibold uppercase tracking-wider text-[#B5AFA6]">
+              Ignored ({ignoredItems.length})
+            </span>
+            {showIgnored ? (
+              <ChevronUp size={14} className="text-[#B5AFA6] ml-auto" />
+            ) : (
+              <ChevronDown size={14} className="text-[#B5AFA6] ml-auto" />
+            )}
+          </button>
+          {showIgnored &&
+            ignoredItems.map((item) => renderItem(item, true))}
+        </div>
       )}
     </div>
   );
@@ -475,17 +681,36 @@ function BillsChecklist() {
             </div>
             <div>
               <label className="block text-[10px] text-[#8B8578] mb-1 font-medium uppercase tracking-wider">
-                {frequency === "weekly" ? "Day (0=Sun)" : "Due Day"}
+                {frequency === "weekly" ? "Day of Week" : "Due Day"}
               </label>
-              <input
-                type="number"
-                placeholder={frequency === "weekly" ? "1" : "15"}
-                value={dueDay}
-                onChange={(e) => setDueDay(e.target.value)}
-                min={frequency === "weekly" ? 0 : 1}
-                max={frequency === "weekly" ? 6 : 31}
-                className={inputClass}
-              />
+              {frequency === "weekly" ? (
+                <div className="flex gap-1">
+                  {DAYS_OF_WEEK.map((day, i) => (
+                    <button
+                      key={day}
+                      type="button"
+                      onClick={() => setDueDay(String(i))}
+                      className={`flex-1 py-2.5 rounded-xl text-xs font-medium transition-colors ${
+                        dueDay === String(i)
+                          ? "bg-[#7C8C6E] text-white"
+                          : "border border-[#E8E2DA] bg-white text-[#8B8578] hover:border-[#7C8C6E]"
+                      }`}
+                    >
+                      {day}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <input
+                  type="number"
+                  placeholder="15"
+                  value={dueDay}
+                  onChange={(e) => setDueDay(e.target.value)}
+                  min={1}
+                  max={31}
+                  className={inputClass}
+                />
+              )}
             </div>
             <div>
               <label className="block text-[10px] text-[#8B8578] mb-1 font-medium uppercase tracking-wider">
