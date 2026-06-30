@@ -1340,8 +1340,13 @@ function WhatIfSimulator({
 // --- Main BudgetView ---
 
 export default function BudgetView() {
-  const { transactions } = useAppState();
+  const { transactions, activeAccountId } = useAppState();
   const [subTab, setSubTab] = useState<SubTab>("bills");
+
+  const accountTransactions = useMemo(() => {
+    if (activeAccountId === "all") return transactions;
+    return transactions.filter((t) => t.accountId === activeAccountId || !t.accountId);
+  }, [transactions, activeAccountId]);
 
   const tabs: { key: SubTab; label: string }[] = [
     { key: "bills", label: "My Bills" },
@@ -1370,8 +1375,8 @@ export default function BudgetView() {
       </div>
 
       {subTab === "bills" && <BillsChecklist />}
-      {subTab === "detected" && <DetectedRecurring transactions={transactions} />}
-      {subTab === "insights" && <SpendingInsights transactions={transactions} />}
+      {subTab === "detected" && <DetectedRecurring transactions={accountTransactions} />}
+      {subTab === "insights" && <SpendingInsights transactions={accountTransactions} />}
     </div>
   );
 }
