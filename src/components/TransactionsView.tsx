@@ -108,6 +108,16 @@ export default function TransactionsView() {
   const addTransaction = () => {
     const amt = parseFloat(newAmount);
     if (!newDescription.trim() || isNaN(amt) || amt === 0) return;
+    const finalAmt = newIsExpense ? -Math.abs(amt) : Math.abs(amt);
+
+    // Derive balance from the most recent transaction
+    const sorted = [...transactions].sort((a, b) => {
+      const dateCmp = new Date(a.date).getTime() - new Date(b.date).getTime();
+      if (dateCmp !== 0) return dateCmp;
+      return (a.seq ?? 0) - (b.seq ?? 0);
+    });
+    const lastBalance = sorted.length > 0 ? sorted[sorted.length - 1].balance : 0;
+
     const maxSeq = transactions.reduce((max, t) => Math.max(max, t.seq ?? 0), 0);
     dispatch({
       type: "ADD_TRANSACTION",
@@ -115,8 +125,8 @@ export default function TransactionsView() {
         id: uuidv4(),
         date: newDate,
         description: newDescription.trim(),
-        amount: newIsExpense ? -Math.abs(amt) : Math.abs(amt),
-        balance: 0,
+        amount: finalAmt,
+        balance: lastBalance + finalAmt,
         category: newCategory,
         statementId: "manual",
         seq: maxSeq + 1,
