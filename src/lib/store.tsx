@@ -40,6 +40,7 @@ type Action =
   | { type: "ADD_TRANSACTION"; payload: Transaction }
   | { type: "UPDATE_TRANSACTION"; payload: Transaction }
   | { type: "DELETE_TRANSACTION"; payload: string }
+  | { type: "REMOVE_TRANSACTIONS"; payload: string[] }
   | { type: "ADD_STATEMENT"; payload: Statement }
   | { type: "REMOVE_STATEMENT"; payload: string }
   | { type: "ADD_GOAL"; payload: Goal }
@@ -112,6 +113,13 @@ function reducer(state: AppState, action: Action): AppState {
           (t) => t.id !== action.payload
         ),
       };
+    case "REMOVE_TRANSACTIONS": {
+      const ids = new Set(action.payload);
+      return {
+        ...state,
+        transactions: state.transactions.filter((t) => !ids.has(t.id)),
+      };
+    }
     case "ADD_STATEMENT":
       return {
         ...state,

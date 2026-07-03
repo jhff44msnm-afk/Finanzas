@@ -208,20 +208,32 @@ export default function Dashboard() {
     const lastTx = sorted[sorted.length - 1];
     const currentBalance = lastTx.balance;
 
-    const latestDate = new Date(lastTx.date);
-    const latestMonth = latestDate.getMonth();
-    const latestYear = latestDate.getFullYear();
-    const currentMonth = latestDate.toLocaleDateString("en-US", {
+    // Always anchor to today's calendar month so manual entries this month
+    // are included even before the next statement arrives.
+    const today = new Date();
+    const todayMonth = today.getMonth();
+    const todayYear = today.getFullYear();
+    const currentMonth = today.toLocaleDateString("en-US", {
       month: "long",
       year: "numeric",
     });
 
     const monthTx = sorted.filter((t) => {
       const d = new Date(t.date);
-      return d.getMonth() === latestMonth && d.getFullYear() === latestYear;
+      return d.getMonth() === todayMonth && d.getFullYear() === todayYear;
     });
 
-    const nonTransfer = monthTx.filter(
+    // If today's month has no transactions yet, fall back to the most recent
+    // statement month so the charts are never empty.
+    const effectiveMonthTx = monthTx.length > 0 ? monthTx : (() => {
+      const latestDate = new Date(lastTx.date);
+      return sorted.filter((t) => {
+        const d = new Date(t.date);
+        return d.getMonth() === latestDate.getMonth() && d.getFullYear() === latestDate.getFullYear();
+      });
+    })();
+
+    const nonTransfer = effectiveMonthTx.filter(
       (t) => t.category !== "Transfers" && t.category !== "Adjustments"
     );
     const totalIncome = nonTransfer
@@ -265,7 +277,7 @@ export default function Dashboard() {
       totalIncome,
       totalExpenses,
       netFlow: totalIncome - totalExpenses,
-      txCount: monthTx.length,
+      txCount: effectiveMonthTx.length,
       weeklyData,
       categoryData,
       recentTx,
