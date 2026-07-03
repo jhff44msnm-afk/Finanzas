@@ -206,7 +206,27 @@ export default function Dashboard() {
     });
 
     const lastTx = sorted[sorted.length - 1];
-    const currentBalance = lastTx.balance;
+
+    // Compute balance from the last statement transaction's ending balance
+    // plus any manual transactions that came after it. This is robust against
+    // old manual entries that were saved with balance: 0 before the fix.
+    const stmtTxs = sorted.filter((t) => t.source === "statement" && t.balance !== 0);
+    const lastStmtTx = stmtTxs[stmtTxs.length - 1];
+    let currentBalance: number;
+    if (lastStmtTx) {
+      const lastStmtTime = new Date(lastStmtTx.date).getTime();
+      const lastStmtSeq = lastStmtTx.seq ?? 0;
+      const manualDelta = sorted
+        .filter((t) => {
+          if (t.source !== "manual") return false;
+          const tTime = new Date(t.date).getTime();
+          return tTime > lastStmtTime || (tTime === lastStmtTime && (t.seq ?? 0) > lastStmtSeq);
+        })
+        .reduce((sum, t) => sum + t.amount, 0);
+      currentBalance = lastStmtTx.balance + manualDelta;
+    } else {
+      currentBalance = lastTx.balance;
+    }
 
     // Always anchor to today's calendar month so manual entries this month
     // are included even before the next statement arrives.
