@@ -18,6 +18,7 @@ import type {
   BillPayment,
   Account,
 } from "./types";
+import { applyLearnedCategories } from "./categories";
 
 interface AppState {
   accounts: Account[];
@@ -29,6 +30,7 @@ interface AppState {
   insurance: InsurancePolicy[];
   bills: RecurringBill[];
   billPayments: BillPayment[];
+  learnedCategories: Record<string, string>;
 }
 
 type Action =
@@ -41,6 +43,7 @@ type Action =
   | { type: "UPDATE_TRANSACTION"; payload: Transaction }
   | { type: "DELETE_TRANSACTION"; payload: string }
   | { type: "REMOVE_TRANSACTIONS"; payload: string[] }
+  | { type: "LEARN_CATEGORY"; payload: { pattern: string; category: string } }
   | { type: "ADD_STATEMENT"; payload: Statement }
   | { type: "REMOVE_STATEMENT"; payload: string }
   | { type: "ADD_GOAL"; payload: Goal }
@@ -89,11 +92,15 @@ function reducer(state: AppState, action: Action): AppState {
       };
     case "SET_ACTIVE_ACCOUNT":
       return { ...state, activeAccountId: action.payload };
-    case "ADD_TRANSACTIONS":
-      return {
-        ...state,
-        transactions: [...state.transactions, ...action.payload],
-      };
+    case "ADD_TRANSACTIONS": {
+      const learned = state.learnedCategories;
+      const incoming = action.payload.map((t) => {
+        if (t.category !== "Other") return t;
+        const cat = applyLearnedCategories(t.description, learned);
+        return cat !== "Other" ? { ...t, category: cat } : t;
+      });
+      return { ...state, transactions: [...state.transactions, ...incoming] };
+    }
     case "ADD_TRANSACTION":
       return {
         ...state,
@@ -119,6 +126,17 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         transactions: state.transactions.filter((t) => !ids.has(t.id)),
       };
+    }
+    case "LEARN_CATEGORY": {
+      const { pattern, category } = action.payload;
+      const newLearned = { ...state.learnedCategories, [pattern]: category };
+      const updated = state.transactions.map((t) => {
+        if (t.category !== "Other") return t;
+        return t.description.toUpperCase().includes(pattern)
+          ? { ...t, category }
+          : t;
+      });
+      return { ...state, learnedCategories: newLearned, transactions: updated };
     }
     case "ADD_STATEMENT":
       return {
@@ -210,6 +228,7 @@ const emptyState: AppState = {
   insurance: [],
   bills: [],
   billPayments: [],
+  learnedCategories: {},
 };
 
 function loadState(): AppState {

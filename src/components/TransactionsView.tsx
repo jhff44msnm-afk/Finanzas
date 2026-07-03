@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import { Search, Pencil, Check, X, Filter, Plus, Calendar, Trash2, AlertTriangle, FileText } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import { useAppState, useAppDispatch } from "@/lib/store";
-import { CATEGORIES, CATEGORY_COLORS } from "@/lib/categories";
+import { CATEGORIES, CATEGORY_COLORS, vendorPattern } from "@/lib/categories";
 import { formatCurrency, currencySymbol } from "@/lib/currency";
 
 export default function TransactionsView() {
@@ -124,6 +124,13 @@ export default function TransactionsView() {
     if (!editingId) return;
     const tx = transactions.find((t) => t.id === editingId);
     if (tx) {
+      // If category changed, save vendor pattern so future transactions auto-categorize
+      if (tx.category !== editCategory) {
+        dispatch({
+          type: "LEARN_CATEGORY",
+          payload: { pattern: vendorPattern(tx.description), category: editCategory },
+        });
+      }
       dispatch({
         type: "UPDATE_TRANSACTION",
         payload: { ...tx, category: editCategory, description: editDescription },
