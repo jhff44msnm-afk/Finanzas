@@ -1,24 +1,46 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Upload, FileText, Trash2, AlertCircle, CheckCircle2, Loader2, Landmark } from "lucide-react";
+import { Upload, FileText, Trash2, AlertCircle, CheckCircle2, Loader2, Landmark, AlertTriangle } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import { useAppState, useAppDispatch } from "@/lib/store";
+import type { Transaction, Statement } from "@/lib/types";
 import { parsePdfFile, detectStatementPeriod } from "@/lib/pdf-parser";
 import { parseBbvaPdf, isBbvaPdf } from "@/lib/bbva-parser";
 
+interface PendingUpload {
+  statement: Statement;
+  taggedTransactions: Transaction[];
+  conflictingManualIds: string[];
+  successMsg: string;
+}
+
 export default function StatementsView() {
-  const { statements, accounts, activeAccountId } = useAppState();
+  const { statements, accounts, activeAccountId, transactions } = useAppState();
   const dispatch = useAppDispatch();
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [pendingUpload, setPendingUpload] = useState<PendingUpload | null>(null);
 
   const filteredStatements =
     activeAccountId === "all"
       ? statements
       : statements.filter((s) => s.accountId === activeAccountId || !s.accountId);
+
+  const finalizeUpload = useCallback(
+    (pending: PendingUpload, deleteManuals: boolean) => {
+      if (deleteManuals && pending.conflictingManualIds.length > 0) {
+        dispatch({ type: "REMOVE_TRANSACTIONS", payload: pending.conflictingManualIds });
+      }
+      dispatch({ type: "ADD_STATEMENT", payload: pending.statement });
+      dispatch({ type: "ADD_TRANSACTIONS", payload: pending.taggedTransactions });
+      setSuccess(pending.successMsg);
+      setPendingUpload(null);
+    },
+    [dispatch]
+  );
 
   const processFile = useCallback(
     async (file: File) => {
@@ -29,6 +51,7 @@ export default function StatementsView() {
       setUploading(true);
       setError(null);
       setSuccess(null);
+      setPendingUpload(null);
 
       try {
         const statementId = uuidv4();
@@ -53,9 +76,9 @@ export default function StatementsView() {
         const isBbva = isBbvaPdf(sampleText);
 
         if (isBbva) {
-          const { transactions, text, accountInfo } = await parseBbvaPdf(file, statementId);
+          const { transactions: parsed, accountInfo } = await parseBbvaPdf(file, statementId);
 
-          if (transactions.length === 0) {
+          if (parsed.length === 0) {
             setError("No transactions found in this BBVA statement.");
             setUploading(false);
             return;
@@ -87,31 +110,48 @@ export default function StatementsView() {
             }
           }
 
-          const taggedTransactions = transactions.map((t) => ({
+          const taggedTransactions = parsed.map((t) => ({
             ...t,
             accountId: targetAccountId,
             source: "statement" as const,
           }));
 
-          dispatch({
-            type: "ADD_STATEMENT",
-            payload: {
-              id: statementId,
-              fileName: file.name,
-              uploadDate: new Date().toISOString().slice(0, 10),
-              periodStart: accountInfo.periodStart,
-              periodEnd: accountInfo.periodEnd,
-              transactionCount: transactions.length,
-              accountId: targetAccountId,
-            },
-          });
+          const statement: Statement = {
+            id: statementId,
+            fileName: file.name,
+            uploadDate: new Date().toISOString().slice(0, 10),
+            periodStart: accountInfo.periodStart,
+            periodEnd: accountInfo.periodEnd,
+            transactionCount: parsed.length,
+            accountId: targetAccountId,
+          };
 
-          dispatch({ type: "ADD_TRANSACTIONS", payload: taggedTransactions });
-          setSuccess(`Imported ${transactions.length} BBVA transactions from "${file.name}".`);
+          const conflictingManualIds = transactions
+            .filter(
+              (t) =>
+                t.source === "manual" &&
+                (t.accountId === targetAccountId || !t.accountId) &&
+                t.date >= accountInfo.periodStart &&
+                t.date <= accountInfo.periodEnd
+            )
+            .map((t) => t.id);
+
+          const pending: PendingUpload = {
+            statement,
+            taggedTransactions,
+            conflictingManualIds,
+            successMsg: `Imported ${parsed.length} BBVA transactions from "${file.name}".`,
+          };
+
+          if (conflictingManualIds.length > 0) {
+            setPendingUpload(pending);
+          } else {
+            finalizeUpload(pending, false);
+          }
         } else {
-          const { transactions, text, year } = await parsePdfFile(file, statementId);
+          const { transactions: parsed, text, year } = await parsePdfFile(file, statementId);
 
-          if (transactions.length === 0) {
+          if (parsed.length === 0) {
             setError("Could not parse any transactions from this PDF.");
             setUploading(false);
             return;
@@ -141,27 +181,44 @@ export default function StatementsView() {
             }
           }
 
-          const taggedTransactions = transactions.map((t) => ({
+          const taggedTransactions = parsed.map((t) => ({
             ...t,
             accountId: targetAccountId,
             source: "statement" as const,
           }));
 
-          dispatch({
-            type: "ADD_STATEMENT",
-            payload: {
-              id: statementId,
-              fileName: file.name,
-              uploadDate: new Date().toISOString().slice(0, 10),
-              periodStart: period.start,
-              periodEnd: period.end,
-              transactionCount: transactions.length,
-              accountId: targetAccountId,
-            },
-          });
+          const statement: Statement = {
+            id: statementId,
+            fileName: file.name,
+            uploadDate: new Date().toISOString().slice(0, 10),
+            periodStart: period.start,
+            periodEnd: period.end,
+            transactionCount: parsed.length,
+            accountId: targetAccountId,
+          };
 
-          dispatch({ type: "ADD_TRANSACTIONS", payload: taggedTransactions });
-          setSuccess(`Imported ${transactions.length} transactions from "${file.name}".`);
+          const conflictingManualIds = transactions
+            .filter(
+              (t) =>
+                t.source === "manual" &&
+                (t.accountId === targetAccountId || !t.accountId) &&
+                t.date >= period.start &&
+                t.date <= period.end
+            )
+            .map((t) => t.id);
+
+          const pending: PendingUpload = {
+            statement,
+            taggedTransactions,
+            conflictingManualIds,
+            successMsg: `Imported ${parsed.length} transactions from "${file.name}".`,
+          };
+
+          if (conflictingManualIds.length > 0) {
+            setPendingUpload(pending);
+          } else {
+            finalizeUpload(pending, false);
+          }
         }
       } catch (err) {
         setError(`Failed to process PDF: ${err instanceof Error ? err.message : "Unknown error"}`);
@@ -169,7 +226,7 @@ export default function StatementsView() {
         setUploading(false);
       }
     },
-    [dispatch, accounts, activeAccountId]
+    [dispatch, accounts, activeAccountId, transactions, finalizeUpload]
   );
 
   const processFiles = useCallback(
@@ -256,6 +313,36 @@ export default function StatementsView() {
         <div className="flex items-center gap-3 bg-[#6B9B7A]/8 border border-[#6B9B7A]/20 text-[#6B9B7A] px-4 py-3 rounded-xl text-sm">
           <CheckCircle2 size={18} />
           {success}
+        </div>
+      )}
+
+      {pendingUpload && (
+        <div className="bg-white rounded-2xl border border-[#D4A76A]/40 p-4 space-y-3">
+          <div className="flex items-start gap-3">
+            <AlertTriangle size={18} className="text-[#D4A76A] shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-[#2D2D2D]">
+                {pendingUpload.conflictingManualIds.length} manual transaction{pendingUpload.conflictingManualIds.length !== 1 ? "s" : ""} found in this statement period
+              </p>
+              <p className="text-xs text-[#8B8578] mt-0.5">
+                These may duplicate entries already in the statement. Delete them to keep things clean, or keep both.
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => finalizeUpload(pendingUpload, true)}
+              className="flex-1 bg-[#C4756E] text-white px-3 py-2 rounded-xl text-sm font-medium hover:bg-[#B36358] transition-colors"
+            >
+              Delete {pendingUpload.conflictingManualIds.length} Manual {pendingUpload.conflictingManualIds.length !== 1 ? "Entries" : "Entry"}
+            </button>
+            <button
+              onClick={() => finalizeUpload(pendingUpload, false)}
+              className="flex-1 bg-[#F5F0EB] text-[#5C5549] px-3 py-2 rounded-xl text-sm font-medium hover:bg-[#EDE7DF] transition-colors"
+            >
+              Keep Both
+            </button>
+          </div>
         </div>
       )}
 
