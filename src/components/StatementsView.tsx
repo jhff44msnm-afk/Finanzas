@@ -173,25 +173,27 @@ export default function StatementsView() {
   );
 
   const processFiles = useCallback(
-    async (files: FileList) => {
-      for (let i = 0; i < files.length; i++) {
-        await processFile(files[i]);
+    async (files: File[]) => {
+      for (const file of files) {
+        await processFile(file);
       }
     },
     [processFile]
   );
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files && files.length > 0) processFiles(files);
+    // Snapshot FileList into a plain array before clearing the input —
+    // iOS Safari invalidates the live FileList as soon as value is reset.
+    const files = e.target.files ? Array.from(e.target.files) : [];
     e.target.value = "";
+    if (files.length > 0) processFiles(files);
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    const files = e.dataTransfer.files;
-    if (files && files.length > 0) processFiles(files);
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) processFiles(files);
   };
 
   const removeStatement = (id: string) => {
