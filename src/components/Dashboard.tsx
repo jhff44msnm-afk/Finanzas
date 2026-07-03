@@ -243,17 +243,7 @@ export default function Dashboard() {
       return d.getMonth() === todayMonth && d.getFullYear() === todayYear;
     });
 
-    // If today's month has no transactions yet, fall back to the most recent
-    // statement month so the charts are never empty.
-    const effectiveMonthTx = monthTx.length > 0 ? monthTx : (() => {
-      const latestDate = new Date(lastTx.date);
-      return sorted.filter((t) => {
-        const d = new Date(t.date);
-        return d.getMonth() === latestDate.getMonth() && d.getFullYear() === latestDate.getFullYear();
-      });
-    })();
-
-    const nonTransfer = effectiveMonthTx.filter(
+    const nonTransfer = monthTx.filter(
       (t) => t.category !== "Transfers" && t.category !== "Adjustments"
     );
     const totalIncome = nonTransfer
@@ -297,7 +287,7 @@ export default function Dashboard() {
       totalIncome,
       totalExpenses,
       netFlow: totalIncome - totalExpenses,
-      txCount: effectiveMonthTx.length,
+      txCount: monthTx.length,
       weeklyData,
       categoryData,
       recentTx,
