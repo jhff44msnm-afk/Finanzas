@@ -7,12 +7,14 @@ import {
   TrendingUp,
   FileUp,
   CalendarCheck,
+  BarChart2,
 } from "lucide-react";
 import type { AppView } from "@/lib/types";
 
 const NAV_ITEMS: { view: AppView; label: string; icon: typeof Home }[] = [
   { view: "dashboard", label: "Home", icon: Home },
   { view: "transactions", label: "Activity", icon: ArrowLeftRight },
+  { view: "insights", label: "Insights", icon: BarChart2 },
   { view: "budget", label: "Budget", icon: CalendarCheck },
   { view: "goals", label: "Goals", icon: Target },
   { view: "investments", label: "Invest", icon: TrendingUp },

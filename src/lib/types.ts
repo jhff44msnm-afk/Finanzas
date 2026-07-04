@@ -86,6 +86,7 @@ export interface BillPayment {
 export type AppView =
   | "dashboard"
   | "transactions"
+  | "insights"
   | "goals"
   | "investments"
   | "statements"
