@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Upload, FileText, Trash2, AlertCircle, CheckCircle2, Loader2, Landmark, AlertTriangle } from "lucide-react";
+import { Upload, FileText, Trash2, AlertCircle, CheckCircle2, Loader2, Landmark, AlertTriangle, Download, UploadCloud } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import { useAppState, useAppDispatch } from "@/lib/store";
 import type { Transaction, Statement } from "@/lib/types";
@@ -402,6 +402,84 @@ export default function StatementsView() {
           The parser auto-detects the bank and reads transactions automatically.
           You can upload multiple files at once.
         </p>
+      </div>
+
+      <DataBackup dispatch={dispatch} onMessage={(msg, isError) => {
+        if (isError) { setError(msg); setSuccess(null); }
+        else { setSuccess(msg); setError(null); }
+      }} />
+    </div>
+  );
+}
+
+function DataBackup({
+  dispatch,
+  onMessage,
+}: {
+  dispatch: ReturnType<typeof useAppDispatch>;
+  onMessage: (msg: string, isError: boolean) => void;
+}) {
+  const STORAGE_KEY = "finanzas-app-state";
+
+  const handleExport = () => {
+    const data = localStorage.getItem(STORAGE_KEY);
+    if (!data) { onMessage("No data to export.", true); return; }
+    const blob = new Blob([data], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `finanzas-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    onMessage("Backup downloaded.", false);
+  };
+
+  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const parsed = JSON.parse(ev.target?.result as string);
+        if (!parsed || typeof parsed !== "object") throw new Error("Invalid format");
+        dispatch({ type: "LOAD_STATE", payload: parsed });
+        onMessage("Backup restored successfully.", false);
+      } catch {
+        onMessage("Invalid backup file — could not restore.", true);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
+  return (
+    <div className="bg-white rounded-2xl border border-[#E8E2DA] p-4 space-y-3">
+      <h3 className="text-xs font-semibold text-[#8B8578] uppercase tracking-wider">
+        Data Backup
+      </h3>
+      <p className="text-xs text-[#B5AFA6] leading-relaxed">
+        Export all your data to a JSON file so you can restore it later, share it between devices, or keep a local copy.
+      </p>
+      <div className="flex gap-2">
+        <button
+          onClick={handleExport}
+          className="flex-1 flex items-center justify-center gap-1.5 bg-[#7C8C6E]/10 text-[#7C8C6E] py-2.5 rounded-xl text-xs font-semibold hover:bg-[#7C8C6E]/20 transition-colors"
+        >
+          <Download size={14} />
+          Export Backup
+        </button>
+        <label className="flex-1 flex items-center justify-center gap-1.5 bg-[#F5F0EB] text-[#5C5549] py-2.5 rounded-xl text-xs font-semibold hover:bg-[#EDE7DF] transition-colors cursor-pointer">
+          <UploadCloud size={14} />
+          Import Backup
+          <input
+            type="file"
+            accept=".json"
+            onChange={handleImport}
+            className="hidden"
+          />
+        </label>
       </div>
     </div>
   );
