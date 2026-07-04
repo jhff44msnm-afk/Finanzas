@@ -9,12 +9,14 @@ import GoalsView from "@/components/GoalsView";
 import InvestmentsView from "@/components/InvestmentsView";
 import StatementsView from "@/components/StatementsView";
 import BudgetView from "@/components/BudgetView";
+import InsightsView from "@/components/InsightsView";
 import AccountSwitcher from "@/components/AccountSwitcher";
 import type { AppView } from "@/lib/types";
 
 const VIEWS: Record<AppView, React.ComponentType> = {
   dashboard: Dashboard,
   transactions: TransactionsView,
+  insights: InsightsView,
   budget: BudgetView,
   goals: GoalsView,
   investments: InvestmentsView,
