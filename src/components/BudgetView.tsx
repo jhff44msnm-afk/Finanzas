@@ -71,26 +71,51 @@ function classifyPriority(category: string, description: string): Priority {
 
 function getNextDueDate(bill: RecurringBill): Date {
   const now = new Date();
-  const today = now.getDate();
+  now.setHours(0, 0, 0, 0);
 
   if (bill.frequency === "monthly") {
     const due = new Date(now.getFullYear(), now.getMonth(), bill.dueDay);
-    if (bill.dueDay <= today) due.setMonth(due.getMonth() + 1);
+    if (due <= now) due.setMonth(due.getMonth() + 1);
     return due;
   }
   if (bill.frequency === "biweekly") {
     const due = new Date(now.getFullYear(), now.getMonth(), bill.dueDay);
-    if (bill.dueDay <= today) due.setDate(due.getDate() + 14);
+    // Keep advancing by 14 days until we land in the future
+    while (due <= now) due.setDate(due.getDate() + 14);
     return due;
+  }
+  // weekly — next occurrence of the given day of week
+  const dayOfWeek = bill.dueDay % 7;
+  const currentDay = now.getDay();
+  let daysUntil = (dayOfWeek - currentDay + 7) % 7 || 7;
+  const due = new Date(now);
+  due.setDate(now.getDate() + daysUntil);
+  return due;
+}
+
+// The most recent cycle start (last time the bill was "due")
+function getLastDueDate(bill: RecurringBill): Date {
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+
+  if (bill.frequency === "monthly") {
+    const due = new Date(now.getFullYear(), now.getMonth(), bill.dueDay);
+    if (due > now) due.setMonth(due.getMonth() - 1);
+    return due;
+  }
+  if (bill.frequency === "biweekly") {
+    const next = getNextDueDate(bill);
+    const last = new Date(next);
+    last.setDate(last.getDate() - 14);
+    return last;
   }
   // weekly
   const dayOfWeek = bill.dueDay % 7;
   const currentDay = now.getDay();
-  let daysUntil = dayOfWeek - currentDay;
-  if (daysUntil <= 0) daysUntil += 7;
-  const due = new Date(now);
-  due.setDate(now.getDate() + daysUntil);
-  return due;
+  const daysAgo = (currentDay - dayOfWeek + 7) % 7;
+  const last = new Date(now);
+  last.setDate(now.getDate() - daysAgo);
+  return last;
 }
 
 function daysUntil(date: Date): number {
@@ -568,27 +593,12 @@ function BillsChecklist() {
       .sort((a, b) => new Date(b.paidDate).getTime() - new Date(a.paidDate).getTime());
 
   const isAlreadyPaidThisCycle = (bill: RecurringBill) => {
-    const nextDue = getNextDueDate(bill);
+    const lastDue = getLastDueDate(bill);
     const payments = getBillPayments(bill.id);
     if (payments.length === 0) return false;
     const lastPaid = new Date(payments[0].paidDate);
-    if (bill.frequency === "monthly") {
-      return (
-        lastPaid.getMonth() === nextDue.getMonth() ||
-        (lastPaid.getMonth() === new Date().getMonth() &&
-          lastPaid.getFullYear() === new Date().getFullYear())
-      );
-    }
-    if (bill.frequency === "biweekly") {
-      const diffDays = Math.abs(
-        (nextDue.getTime() - lastPaid.getTime()) / 86400000
-      );
-      return diffDays < 14;
-    }
-    const diffDays = Math.abs(
-      (new Date().getTime() - lastPaid.getTime()) / 86400000
-    );
-    return diffDays < 7;
+    lastPaid.setHours(0, 0, 0, 0);
+    return lastPaid >= lastDue;
   };
 
   const totalIncome = useMemo(() => {
@@ -599,6 +609,17 @@ function BillsChecklist() {
     });
     return monthTx.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0);
   }, [transactions]);
+
+  // Sum of bill payments recorded this calendar month
+  const paidBillsThisMonth = useMemo(() => {
+    const now = new Date();
+    return billPayments
+      .filter((p) => {
+        const d = new Date(p.paidDate);
+        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+      })
+      .reduce((sum, p) => sum + p.amount, 0);
+  }, [billPayments]);
 
   const totalMonthlyBills = useMemo(() => {
     return bills.reduce((sum, b) => {
@@ -771,12 +792,12 @@ function BillsChecklist() {
             </p>
             <p
               className={`text-base font-bold mt-1 ${
-                totalIncome - totalMonthlyBills >= 0
+                totalIncome - paidBillsThisMonth >= 0
                   ? "text-[#6B9B7A]"
                   : "text-[#C4756E]"
               }`}
             >
-              ${(totalIncome - totalMonthlyBills).toFixed(2)}
+              ${(totalIncome - paidBillsThisMonth).toFixed(2)}
             </p>
           </div>
         </div>
@@ -859,6 +880,11 @@ function BillsChecklist() {
                                 ? `${Math.abs(days)}d overdue`
                                 : `${days}d left`}
                         </span>
+                        {paid && (
+                          <span className="text-[10px] text-[#B5AFA6]">
+                            Next: {formatDate(nextDue)}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -942,9 +968,23 @@ function BillsChecklist() {
                                 {p.paidDate}
                               </span>
                             </div>
-                            <span className="text-[#2D2D2D] font-medium">
-                              ${p.amount.toFixed(2)}
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[#2D2D2D] font-medium">
+                                ${p.amount.toFixed(2)}
+                              </span>
+                              <button
+                                onClick={() =>
+                                  dispatch({
+                                    type: "DELETE_BILL_PAYMENT",
+                                    payload: p.id,
+                                  })
+                                }
+                                className="p-0.5 text-[#B5AFA6] hover:text-[#C4756E] transition-colors"
+                                title="Delete payment"
+                              >
+                                <Trash2 size={11} />
+                              </button>
+                            </div>
                           </div>
                         ))}
                       </div>

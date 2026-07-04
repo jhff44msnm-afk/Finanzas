@@ -59,6 +59,7 @@ type Action =
   | { type: "UPDATE_BILL"; payload: RecurringBill }
   | { type: "DELETE_BILL"; payload: string }
   | { type: "ADD_BILL_PAYMENT"; payload: BillPayment }
+  | { type: "DELETE_BILL_PAYMENT"; payload: string }
   | { type: "LOAD_STATE"; payload: AppState };
 
 function reducer(state: AppState, action: Action): AppState {
@@ -210,6 +211,11 @@ function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         billPayments: [...state.billPayments, action.payload],
+      };
+    case "DELETE_BILL_PAYMENT":
+      return {
+        ...state,
+        billPayments: state.billPayments.filter((p) => p.id !== action.payload),
       };
     default:
       return state;
