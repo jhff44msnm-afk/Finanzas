@@ -792,12 +792,12 @@ function BillsChecklist() {
             </p>
             <p
               className={`text-base font-bold mt-1 ${
-                totalIncome - paidBillsThisMonth >= 0
+                totalMonthlyBills - paidBillsThisMonth <= 0
                   ? "text-[#6B9B7A]"
-                  : "text-[#C4756E]"
+                  : "text-[#2D2D2D]"
               }`}
             >
-              ${(totalIncome - paidBillsThisMonth).toFixed(2)}
+              ${Math.max(0, totalMonthlyBills - paidBillsThisMonth).toFixed(2)}
             </p>
           </div>
         </div>
