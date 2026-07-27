@@ -1,21 +1,48 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Upload, FileText, Trash2, AlertCircle, CheckCircle2, Loader2, Camera, Download, UploadCloud } from "lucide-react";
+import { Upload, FileText, Trash2, AlertCircle, CheckCircle2, Loader2, Landmark, AlertTriangle, Download, UploadCloud, Camera } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import { useAppState, useAppDispatch } from "@/lib/store";
-import type { Transaction, Statement } from "@/lib/types";
+import type { Transaction, Statement, Account } from "@/lib/types";
 import { parsePdfFile, detectStatementPeriod } from "@/lib/pdf-parser";
+import { parseBbvaPdf, isBbvaPdf } from "@/lib/bbva-parser";
 import { parseScreenshot, fileToBase64, resolveMediaType, type ExtractedTransaction } from "@/lib/screenshot-parser";
 import { categorizeTransaction } from "@/lib/categories";
 
+interface PendingUpload {
+  statement: Statement;
+  taggedTransactions: Transaction[];
+  conflictingManualIds: string[];
+  successMsg: string;
+}
+
 export default function StatementsView() {
-  const { statements } = useAppState();
+  const { statements, accounts, activeAccountId, transactions } = useAppState();
   const dispatch = useAppDispatch();
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [pendingUpload, setPendingUpload] = useState<PendingUpload | null>(null);
+
+  const filteredStatements =
+    activeAccountId === "all"
+      ? statements
+      : statements.filter((s) => s.accountId === activeAccountId || !s.accountId);
+
+  const finalizeUpload = useCallback(
+    (pending: PendingUpload, deleteManuals: boolean) => {
+      if (deleteManuals && pending.conflictingManualIds.length > 0) {
+        dispatch({ type: "REMOVE_TRANSACTIONS", payload: pending.conflictingManualIds });
+      }
+      dispatch({ type: "ADD_STATEMENT", payload: pending.statement });
+      dispatch({ type: "ADD_TRANSACTIONS", payload: pending.taggedTransactions });
+      setSuccess(pending.successMsg);
+      setPendingUpload(null);
+    },
+    [dispatch]
+  );
 
   const processFile = useCallback(
     async (file: File) => {
@@ -26,66 +53,217 @@ export default function StatementsView() {
       setUploading(true);
       setError(null);
       setSuccess(null);
+      setPendingUpload(null);
 
       try {
         const statementId = uuidv4();
-        const { transactions, text } = await parsePdfFile(file, statementId);
 
-        if (transactions.length === 0) {
-          setError("Could not parse any transactions from this PDF. Make sure it is a bank statement.");
-          setUploading(false);
-          return;
+        const arrayBuffer = await file.arrayBuffer();
+
+        // @ts-expect-error -- load worker on main thread
+        globalThis.pdfjsWorker = await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
+        const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+        pdfjsLib.GlobalWorkerOptions.workerSrc = "data:,";
+        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+        let sampleText = "";
+        for (let p = 1; p <= Math.min(pdf.numPages, 3); p++) {
+          const page = await pdf.getPage(p);
+          const content = await page.getTextContent();
+          sampleText += content.items
+            .filter((item) => "str" in item)
+            .map((item) => (item as { str: string }).str)
+            .join(" ");
         }
 
-        const yearMatch = text.match(/Statement\s+from\s+\d{2}\/\d{2}\/(\d{2,4})/i);
-        let year = new Date().getFullYear();
-        if (yearMatch) {
-          year = parseInt(yearMatch[1]);
-          if (year < 100) year += 2000;
-        }
-        const period = detectStatementPeriod(text, year);
+        const isBbva = isBbvaPdf(sampleText);
 
-        dispatch({
-          type: "ADD_STATEMENT",
-          payload: {
+        if (isBbva) {
+          const { transactions: parsed, accountInfo } = await parseBbvaPdf(file, statementId);
+
+          if (parsed.length === 0) {
+            setError("No transactions found in this BBVA statement.");
+            setUploading(false);
+            return;
+          }
+
+          let targetAccountId = activeAccountId !== "all" ? activeAccountId : undefined;
+
+          if (!targetAccountId) {
+            const existing = accounts.find(
+              (a) => a.type === "mx" && a.cuentaNumber === accountInfo.cuentaNumber
+            );
+            if (existing) {
+              targetAccountId = existing.id;
+            } else {
+              const newAccount = {
+                id: uuidv4(),
+                name: "BBVA Cuenta",
+                bankName: "BBVA México",
+                type: "mx" as const,
+                currency: "MXN" as const,
+                cuentaNumber: accountInfo.cuentaNumber || undefined,
+                clabeNumber: accountInfo.clabeNumber || undefined,
+              };
+              dispatch({ type: "ADD_ACCOUNT", payload: newAccount });
+              targetAccountId = newAccount.id;
+              if (accounts.length === 0) {
+                dispatch({ type: "SET_ACTIVE_ACCOUNT", payload: newAccount.id });
+              }
+            }
+          }
+
+          const taggedTransactions = parsed.map((t) => ({
+            ...t,
+            accountId: targetAccountId,
+            source: "statement" as const,
+          }));
+
+          const statement: Statement = {
+            id: statementId,
+            fileName: file.name,
+            uploadDate: new Date().toISOString().slice(0, 10),
+            periodStart: accountInfo.periodStart,
+            periodEnd: accountInfo.periodEnd,
+            transactionCount: parsed.length,
+            accountId: targetAccountId,
+          };
+
+          const conflictingManualIds = transactions
+            .filter(
+              (t) =>
+                t.source === "manual" &&
+                (t.accountId === targetAccountId || !t.accountId) &&
+                t.date >= accountInfo.periodStart &&
+                t.date <= accountInfo.periodEnd
+            )
+            .map((t) => t.id);
+
+          const pending: PendingUpload = {
+            statement,
+            taggedTransactions,
+            conflictingManualIds,
+            successMsg: `Imported ${parsed.length} BBVA transactions from "${file.name}".`,
+          };
+
+          if (conflictingManualIds.length > 0) {
+            setPendingUpload(pending);
+          } else {
+            finalizeUpload(pending, false);
+          }
+        } else {
+          const { transactions: parsed, text, year } = await parsePdfFile(file, statementId);
+
+          if (parsed.length === 0) {
+            setError("Could not parse any transactions from this PDF.");
+            setUploading(false);
+            return;
+          }
+
+          const period = detectStatementPeriod(text, year);
+
+          let targetAccountId = activeAccountId !== "all" ? activeAccountId : undefined;
+
+          if (!targetAccountId) {
+            const existing = accounts.find((a) => a.type === "us");
+            if (existing) {
+              targetAccountId = existing.id;
+            } else {
+              const newAccount = {
+                id: uuidv4(),
+                name: "GECU Checking",
+                bankName: "GECU Federal Credit Union",
+                type: "us" as const,
+                currency: "USD" as const,
+              };
+              dispatch({ type: "ADD_ACCOUNT", payload: newAccount });
+              targetAccountId = newAccount.id;
+              if (accounts.length === 0) {
+                dispatch({ type: "SET_ACTIVE_ACCOUNT", payload: newAccount.id });
+              }
+            }
+          }
+
+          const taggedTransactions = parsed.map((t) => ({
+            ...t,
+            accountId: targetAccountId,
+            source: "statement" as const,
+          }));
+
+          const statement: Statement = {
             id: statementId,
             fileName: file.name,
             uploadDate: new Date().toISOString().slice(0, 10),
             periodStart: period.start,
             periodEnd: period.end,
-            transactionCount: transactions.length,
-          },
-        });
+            transactionCount: parsed.length,
+            accountId: targetAccountId,
+          };
 
-        dispatch({ type: "ADD_TRANSACTIONS", payload: transactions });
+          const conflictingManualIds = transactions
+            .filter(
+              (t) =>
+                t.source === "manual" &&
+                (t.accountId === targetAccountId || !t.accountId) &&
+                t.date >= period.start &&
+                t.date <= period.end
+            )
+            .map((t) => t.id);
 
-        setSuccess(`Imported ${transactions.length} transactions from "${file.name}".`);
+          const pending: PendingUpload = {
+            statement,
+            taggedTransactions,
+            conflictingManualIds,
+            successMsg: `Imported ${parsed.length} transactions from "${file.name}".`,
+          };
+
+          if (conflictingManualIds.length > 0) {
+            setPendingUpload(pending);
+          } else {
+            finalizeUpload(pending, false);
+          }
+        }
       } catch (err) {
         setError(`Failed to process PDF: ${err instanceof Error ? err.message : "Unknown error"}`);
       } finally {
         setUploading(false);
       }
     },
-    [dispatch]
+    [dispatch, accounts, activeAccountId, transactions, finalizeUpload]
+  );
+
+  const processFiles = useCallback(
+    async (files: File[]) => {
+      for (const file of files) {
+        await processFile(file);
+      }
+    },
+    [processFile]
   );
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) processFile(file);
+    // Snapshot FileList into a plain array before clearing the input —
+    // iOS Safari invalidates the live FileList as soon as value is reset.
+    const files = e.target.files ? Array.from(e.target.files) : [];
     e.target.value = "";
+    if (files.length > 0) processFiles(files);
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) processFile(file);
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) processFiles(files);
   };
 
   const removeStatement = (id: string) => {
     dispatch({ type: "REMOVE_STATEMENT", payload: id });
     setSuccess(null);
     setError(null);
+  };
+
+  const getAccountForStatement = (stmt: { accountId?: string }) => {
+    if (!stmt.accountId) return null;
+    return accounts.find((a) => a.id === stmt.accountId) ?? null;
   };
 
   return (
@@ -114,13 +292,13 @@ export default function StatementsView() {
             </div>
             <div>
               <p className="text-[#2D2D2D] font-medium text-sm">
-                Drop your bank statement PDF here
+                Drop your bank statement PDFs here
               </p>
-              <p className="text-[#B5AFA6] text-xs mt-1">or tap to browse files</p>
+              <p className="text-[#B5AFA6] text-xs mt-1">Upload one or more files &middot; GECU &amp; BBVA supported</p>
             </div>
             <label className="mt-1 bg-[#7C8C6E] text-white px-5 py-2 rounded-xl text-sm font-medium hover:bg-[#6B7A5E] cursor-pointer transition-colors">
-              Select PDF
-              <input type="file" accept=".pdf" onChange={handleFileChange} className="hidden" />
+              Select PDFs
+              <input type="file" accept=".pdf" multiple onChange={handleFileChange} className="hidden" />
             </label>
           </div>
         )}
@@ -140,55 +318,104 @@ export default function StatementsView() {
         </div>
       )}
 
-      {statements.length > 0 && (
-        <div className="space-y-2">
-          <h3 className="text-sm font-semibold text-[#2D2D2D]">Uploaded Statements</h3>
-          {statements.map((stmt) => (
-            <div
-              key={stmt.id}
-              className="bg-white rounded-2xl border border-[#E8E2DA] p-4 flex items-center justify-between"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-10 h-10 bg-[#7C8C6E]/10 rounded-xl flex items-center justify-center shrink-0">
-                  <FileText size={20} className="text-[#7C8C6E]" />
-                </div>
-                <div className="min-w-0">
-                  <p className="font-medium text-[#2D2D2D] text-sm truncate">{stmt.fileName}</p>
-                  <div className="flex flex-wrap gap-x-3 text-xs text-[#B5AFA6] mt-0.5">
-                    {stmt.periodStart && stmt.periodEnd && (
-                      <span>{stmt.periodStart} to {stmt.periodEnd}</span>
-                    )}
-                    <span>{stmt.transactionCount} transactions</span>
-                  </div>
-                </div>
-              </div>
-              <button
-                onClick={() => removeStatement(stmt.id)}
-                className="text-[#B5AFA6] hover:text-[#C4756E] transition-colors p-2 rounded-lg hover:bg-[#C4756E]/10 shrink-0"
-              >
-                <Trash2 size={16} />
-              </button>
+      {pendingUpload && (
+        <div className="bg-white rounded-2xl border border-[#D4A76A]/40 p-4 space-y-3">
+          <div className="flex items-start gap-3">
+            <AlertTriangle size={18} className="text-[#D4A76A] shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-[#2D2D2D]">
+                {pendingUpload.conflictingManualIds.length} manual transaction{pendingUpload.conflictingManualIds.length !== 1 ? "s" : ""} found in this statement period
+              </p>
+              <p className="text-xs text-[#8B8578] mt-0.5">
+                These may duplicate entries already in the statement. Delete them to keep things clean, or keep both.
+              </p>
             </div>
-          ))}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => finalizeUpload(pendingUpload, true)}
+              className="flex-1 bg-[#C4756E] text-white px-3 py-2 rounded-xl text-sm font-medium hover:bg-[#B36358] transition-colors"
+            >
+              Delete {pendingUpload.conflictingManualIds.length} Manual {pendingUpload.conflictingManualIds.length !== 1 ? "Entries" : "Entry"}
+            </button>
+            <button
+              onClick={() => finalizeUpload(pendingUpload, false)}
+              className="flex-1 bg-[#F5F0EB] text-[#5C5549] px-3 py-2 rounded-xl text-sm font-medium hover:bg-[#EDE7DF] transition-colors"
+            >
+              Keep Both
+            </button>
+          </div>
         </div>
       )}
 
-      <ScreenshotImport dispatch={dispatch} />
+      {filteredStatements.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-[#2D2D2D]">Uploaded Statements</h3>
+          {filteredStatements.map((stmt) => {
+            const acc = getAccountForStatement(stmt);
+            return (
+              <div
+                key={stmt.id}
+                className="bg-white rounded-2xl border border-[#E8E2DA] p-4 flex items-center justify-between"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                    acc?.type === "mx" ? "bg-[#006847]/10" : "bg-[#7C8C6E]/10"
+                  }`}>
+                    {acc?.type === "mx" ? (
+                      <Landmark size={20} className="text-[#006847]" />
+                    ) : (
+                      <FileText size={20} className="text-[#7C8C6E]" />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-medium text-[#2D2D2D] text-sm truncate">{stmt.fileName}</p>
+                    <div className="flex flex-wrap gap-x-3 text-xs text-[#B5AFA6] mt-0.5">
+                      {acc && (
+                        <span className={`font-medium ${acc.type === "mx" ? "text-[#006847]" : "text-[#7C8C6E]"}`}>
+                          {acc.name}
+                        </span>
+                      )}
+                      {stmt.periodStart && stmt.periodEnd && (
+                        <span>{stmt.periodStart} to {stmt.periodEnd}</span>
+                      )}
+                      <span>{stmt.transactionCount} transactions</span>
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => removeStatement(stmt.id)}
+                  className="text-[#B5AFA6] hover:text-[#C4756E] transition-colors p-2 rounded-lg hover:bg-[#C4756E]/10 shrink-0"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="bg-white rounded-2xl border border-[#E8E2DA] p-4">
+        <h3 className="text-xs font-semibold text-[#8B8578] uppercase tracking-wider mb-2">
+          Supported Formats
+        </h3>
+        <p className="text-xs text-[#B5AFA6] leading-relaxed">
+          GECU Federal Credit Union (USD) and BBVA México (MXN) statements in PDF format.
+          The parser auto-detects the bank and reads transactions automatically.
+          You can upload multiple files at once.
+        </p>
+      </div>
+
+      <ScreenshotImport
+        dispatch={dispatch}
+        accounts={accounts}
+        activeAccountId={activeAccountId}
+      />
 
       <DataBackup dispatch={dispatch} onMessage={(msg, isError) => {
         if (isError) { setError(msg); setSuccess(null); }
         else { setSuccess(msg); setError(null); }
       }} />
-
-      <div className="bg-white rounded-2xl border border-[#E8E2DA] p-4">
-        <h3 className="text-xs font-semibold text-[#8B8578] uppercase tracking-wider mb-2">
-          Supported Format
-        </h3>
-        <p className="text-xs text-[#B5AFA6] leading-relaxed">
-          Currently supports GECU Federal Credit Union member statements in PDF format.
-          The parser reads Date, Description, Amount, and Balance columns automatically.
-        </p>
-      </div>
     </div>
   );
 }
@@ -197,8 +424,12 @@ const API_KEY_STORAGE = "finanzas-anthropic-key";
 
 function ScreenshotImport({
   dispatch,
+  accounts,
+  activeAccountId,
 }: {
   dispatch: ReturnType<typeof useAppDispatch>;
+  accounts: Account[];
+  activeAccountId: string;
 }) {
   const [apiKey, setApiKey] = useState(() =>
     typeof window !== "undefined" ? (localStorage.getItem(API_KEY_STORAGE) ?? "") : ""
@@ -210,6 +441,9 @@ function ScreenshotImport({
   const [success, setSuccess] = useState<string | null>(null);
   const [extracted, setExtracted] = useState<ExtractedTransaction[] | null>(null);
   const [imageName, setImageName] = useState("");
+  const [targetAccountId, setTargetAccountId] = useState(() =>
+    activeAccountId !== "all" ? activeAccountId : (accounts[0]?.id ?? "")
+  );
   const [imgDragOver, setImgDragOver] = useState(false);
 
   const saveApiKey = (key: string) => {
@@ -255,6 +489,7 @@ function ScreenshotImport({
       .sort();
     const periodStart = validDates[0] ?? today;
     const periodEnd = validDates[validDates.length - 1] ?? today;
+    const targetId = targetAccountId || undefined;
 
     const taggedTransactions: Transaction[] = extracted.map((t, i) => ({
       id: uuidv4(),
@@ -265,6 +500,8 @@ function ScreenshotImport({
       category: categorizeTransaction(t.description),
       statementId,
       seq: i,
+      accountId: targetId,
+      source: "statement" as const,
     }));
 
     const statement: Statement = {
@@ -274,6 +511,7 @@ function ScreenshotImport({
       periodStart,
       periodEnd,
       transactionCount: extracted.length,
+      accountId: targetId,
     };
 
     dispatch({ type: "ADD_STATEMENT", payload: statement });
@@ -302,12 +540,11 @@ function ScreenshotImport({
         </div>
       </div>
 
-      {/* API Key setup */}
       {!apiKey || editingKey ? (
         <div className="space-y-2">
           <p className="text-xs text-[#8B8578] leading-relaxed">
             Enter your Anthropic API key to enable AI-powered screenshot reading.
-            Your key is stored only in this browser and never sent to our servers.
+            Stored only in this browser, never sent to our servers.
           </p>
           <div className="flex gap-2">
             <input
@@ -349,13 +586,10 @@ function ScreenshotImport({
             </button>
           </div>
 
-          {/* Image drop zone */}
           {!extracted && !processing && (
             <div
               className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
-                imgDragOver
-                  ? "border-[#9B7EB5] bg-[#9B7EB5]/5"
-                  : "border-[#E8E2DA] hover:border-[#B5AFA6]"
+                imgDragOver ? "border-[#9B7EB5] bg-[#9B7EB5]/5" : "border-[#E8E2DA] hover:border-[#B5AFA6]"
               }`}
               onDragOver={(e) => { e.preventDefault(); setImgDragOver(true); }}
               onDragLeave={() => setImgDragOver(false)}
@@ -381,7 +615,6 @@ function ScreenshotImport({
             </div>
           )}
 
-          {/* Processing spinner */}
           {processing && (
             <div className="flex flex-col items-center gap-3 py-5">
               <Loader2 size={26} className="text-[#9B7EB5] animate-spin" />
@@ -389,7 +622,6 @@ function ScreenshotImport({
             </div>
           )}
 
-          {/* Extracted transactions review */}
           {extracted && !processing && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
@@ -404,23 +636,30 @@ function ScreenshotImport({
                 </button>
               </div>
 
+              {accounts.length > 1 && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-[#8B8578] shrink-0">Import to:</span>
+                  <select
+                    value={targetAccountId}
+                    onChange={(e) => setTargetAccountId(e.target.value)}
+                    className="flex-1 text-xs border border-[#E8E2DA] rounded-lg px-2 py-1.5 bg-[#F5F0EB] outline-none"
+                  >
+                    {accounts.map((acc) => (
+                      <option key={acc.id} value={acc.id}>{acc.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div className="max-h-60 overflow-y-auto space-y-1 pr-0.5">
                 {extracted.map((t, i) => (
-                  <div
-                    key={i}
-                    className="flex items-center justify-between px-3 py-2 rounded-lg bg-[#F5F0EB] gap-3"
-                  >
+                  <div key={i} className="flex items-center justify-between px-3 py-2 rounded-lg bg-[#F5F0EB] gap-3">
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-medium text-[#2D2D2D] truncate">{t.description || "—"}</p>
                       <p className="text-[11px] text-[#B5AFA6]">{t.date}</p>
                     </div>
-                    <span
-                      className={`text-xs font-semibold shrink-0 ${
-                        t.amount >= 0 ? "text-[#6B9B7A]" : "text-[#2D2D2D]"
-                      }`}
-                    >
-                      {t.amount >= 0 ? "+" : ""}
-                      {Math.abs(t.amount).toFixed(2)}
+                    <span className={`text-xs font-semibold shrink-0 ${t.amount >= 0 ? "text-[#6B9B7A]" : "text-[#2D2D2D]"}`}>
+                      {t.amount >= 0 ? "+" : ""}{Math.abs(t.amount).toFixed(2)}
                     </span>
                   </div>
                 ))}
@@ -502,7 +741,7 @@ function DataBackup({
         Data Backup
       </h3>
       <p className="text-xs text-[#B5AFA6] leading-relaxed">
-        Export all your data to a JSON file so you can restore it later or share it between devices.
+        Export all your data to a JSON file so you can restore it later, share it between devices, or keep a local copy.
       </p>
       <div className="flex gap-2">
         <button

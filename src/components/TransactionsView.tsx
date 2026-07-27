@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Search, Pencil, Check, X, Filter, Plus, Calendar } from "lucide-react";
+import { Search, Pencil, Check, X, Filter, Plus, Calendar, Trash2, AlertTriangle, FileText } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import { useAppState, useAppDispatch } from "@/lib/store";
-import { CATEGORIES, CATEGORY_COLORS } from "@/lib/categories";
+import { CATEGORIES, CATEGORY_COLORS, vendorPattern } from "@/lib/categories";
+import { formatCurrency, currencySymbol } from "@/lib/currency";
 
 export default function TransactionsView() {
-  const { transactions } = useAppState();
+  const { transactions, accounts, activeAccountId } = useAppState();
   const dispatch = useAppDispatch();
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("All");
@@ -26,11 +27,37 @@ export default function TransactionsView() {
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
 
+  const activeAccount = accounts.find((a) => a.id === activeAccountId);
+  const currency = activeAccount?.currency ?? "USD";
+  const sym = currencySymbol(currency);
+
   const inputClass =
     "w-full border border-[#E8E2DA] rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[#7C8C6E] bg-white text-[#2D2D2D]";
 
+  const accountTransactions = useMemo(() => {
+    if (activeAccountId === "all") return transactions;
+    return transactions.filter((t) => t.accountId === activeAccountId || !t.accountId);
+  }, [transactions, activeAccountId]);
+
+  const duplicates = useMemo(() => {
+    const dupeSet = new Set<string>();
+    const seen = new Map<string, string>();
+    for (const tx of accountTransactions) {
+      if (tx.amount === 0) continue;
+      const key = `${tx.date}|${tx.description.toUpperCase()}|${tx.amount}`;
+      const existing = seen.get(key);
+      if (existing) {
+        dupeSet.add(existing);
+        dupeSet.add(tx.id);
+      } else {
+        seen.set(key, tx.id);
+      }
+    }
+    return dupeSet;
+  }, [accountTransactions]);
+
   const filtered = useMemo(() => {
-    let result = [...transactions];
+    let result = [...accountTransactions];
 
     if (timeFilter !== "all") {
       const now = new Date();
@@ -74,7 +101,7 @@ export default function TransactionsView() {
       return sortDir === "asc" ? cmp : -cmp;
     });
     return result;
-  }, [transactions, search, categoryFilter, sortField, sortDir, timeFilter, customFrom, customTo]);
+  }, [accountTransactions, search, categoryFilter, sortField, sortDir, timeFilter, customFrom, customTo]);
 
   const handleSort = (field: "date" | "amount" | "balance") => {
     if (sortField === field) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -97,6 +124,13 @@ export default function TransactionsView() {
     if (!editingId) return;
     const tx = transactions.find((t) => t.id === editingId);
     if (tx) {
+      // If category changed, save vendor pattern so future transactions auto-categorize
+      if (tx.category !== editCategory) {
+        dispatch({
+          type: "LEARN_CATEGORY",
+          payload: { pattern: vendorPattern(tx.description), category: editCategory },
+        });
+      }
       dispatch({
         type: "UPDATE_TRANSACTION",
         payload: { ...tx, category: editCategory, description: editDescription },
@@ -108,6 +142,16 @@ export default function TransactionsView() {
   const addTransaction = () => {
     const amt = parseFloat(newAmount);
     if (!newDescription.trim() || isNaN(amt) || amt === 0) return;
+    const finalAmt = newIsExpense ? -Math.abs(amt) : Math.abs(amt);
+
+    // Derive balance from the most recent transaction
+    const sorted = [...transactions].sort((a, b) => {
+      const dateCmp = new Date(a.date).getTime() - new Date(b.date).getTime();
+      if (dateCmp !== 0) return dateCmp;
+      return (a.seq ?? 0) - (b.seq ?? 0);
+    });
+    const lastBalance = sorted.length > 0 ? sorted[sorted.length - 1].balance : 0;
+
     const maxSeq = transactions.reduce((max, t) => Math.max(max, t.seq ?? 0), 0);
     dispatch({
       type: "ADD_TRANSACTION",
@@ -115,11 +159,13 @@ export default function TransactionsView() {
         id: uuidv4(),
         date: newDate,
         description: newDescription.trim(),
-        amount: newIsExpense ? -Math.abs(amt) : Math.abs(amt),
-        balance: 0,
+        amount: finalAmt,
+        balance: lastBalance + finalAmt,
         category: newCategory,
         statementId: "manual",
         seq: maxSeq + 1,
+        accountId: activeAccountId !== "all" ? activeAccountId : undefined,
+        source: "manual",
       },
     });
     setNewDescription("");
@@ -135,6 +181,8 @@ export default function TransactionsView() {
     .filter((t) => t.amount > 0)
     .reduce((s, t) => s + t.amount, 0);
 
+  const dupeCount = filtered.filter((t) => duplicates.has(t.id)).length;
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -147,6 +195,15 @@ export default function TransactionsView() {
           Add
         </button>
       </div>
+
+      {dupeCount > 0 && (
+        <div className="flex items-center gap-3 bg-[#D4A76A]/10 border border-[#D4A76A]/20 text-[#D4A76A] px-4 py-3 rounded-xl text-sm">
+          <AlertTriangle size={18} />
+          <span>
+            <strong>{dupeCount}</strong> potential duplicate{dupeCount !== 1 ? "s" : ""} detected (same date, description &amp; amount)
+          </span>
+        </div>
+      )}
 
       {showAddForm && (
         <div className="bg-white rounded-2xl border border-[#E8E2DA] p-4 space-y-3">
@@ -167,7 +224,7 @@ export default function TransactionsView() {
               <input type="text" value={newDescription} onChange={(e) => setNewDescription(e.target.value)} placeholder="e.g. Cash payment" className={inputClass} />
             </div>
             <div className="col-span-2">
-              <label className="block text-[10px] text-[#8B8578] mb-1 font-medium uppercase tracking-wider">Amount</label>
+              <label className="block text-[10px] text-[#8B8578] mb-1 font-medium uppercase tracking-wider">Amount ({sym})</label>
               <div className="flex gap-2">
                 <select
                   value={newIsExpense ? "expense" : "income"}
@@ -243,11 +300,11 @@ export default function TransactionsView() {
 
       <div className="flex gap-3 text-xs">
         <span className="text-[#8B8578]">{filtered.length} transactions</span>
-        <span className="text-[#6B9B7A] font-semibold">+${totalIncome.toFixed(2)}</span>
-        <span className="text-[#C4756E] font-semibold">-${totalExpenses.toFixed(2)}</span>
+        <span className="text-[#6B9B7A] font-semibold">+{formatCurrency(totalIncome, currency)}</span>
+        <span className="text-[#C4756E] font-semibold">-{formatCurrency(totalExpenses, currency)}</span>
       </div>
 
-      {transactions.length === 0 ? (
+      {accountTransactions.length === 0 ? (
         <div className="flex items-center justify-center py-16">
           <div className="text-center">
             <p className="text-[#8B8578]">No transactions yet.</p>
@@ -256,83 +313,113 @@ export default function TransactionsView() {
         </div>
       ) : (
         <div className="space-y-2">
-          {filtered.map((tx) => (
-            <div
-              key={tx.id}
-              className="bg-white rounded-2xl border border-[#E8E2DA] p-3.5"
-            >
-              {editingId === tx.id ? (
-                <div className="space-y-2">
-                  <input
-                    value={editDescription}
-                    onChange={(e) => setEditDescription(e.target.value)}
-                    className={inputClass}
-                  />
-                  <select
-                    value={editCategory}
-                    onChange={(e) => setEditCategory(e.target.value)}
-                    className={inputClass}
-                  >
-                    {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                  <div className="flex gap-2">
-                    <button onClick={saveEdit} className="flex items-center gap-1 bg-[#6B9B7A] text-white px-3 py-1.5 rounded-lg text-xs font-medium">
-                      <Check size={14} /> Save
-                    </button>
-                    <button onClick={() => setEditingId(null)} className="flex items-center gap-1 bg-[#F5F0EB] text-[#5C5549] px-3 py-1.5 rounded-lg text-xs font-medium">
-                      <X size={14} /> Cancel
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div
-                      className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-                      style={{
-                        backgroundColor: (CATEGORY_COLORS[tx.category] ?? "#B5AFA6") + "18",
-                      }}
+          {filtered.map((tx) => {
+            const isManual = tx.source === "manual" || tx.statementId === "manual";
+            const isDupe = duplicates.has(tx.id);
+            const txAccount = accounts.find((a) => a.id === tx.accountId);
+            const txCurrency = txAccount?.currency ?? currency;
+
+            return (
+              <div
+                key={tx.id}
+                className={`bg-white rounded-2xl border p-3.5 ${
+                  isDupe ? "border-[#D4A76A]/40" : "border-[#E8E2DA]"
+                }`}
+              >
+                {editingId === tx.id ? (
+                  <div className="space-y-2">
+                    <input
+                      value={editDescription}
+                      onChange={(e) => setEditDescription(e.target.value)}
+                      className={inputClass}
+                    />
+                    <select
+                      value={editCategory}
+                      onChange={(e) => setEditCategory(e.target.value)}
+                      className={inputClass}
                     >
-                      <span className="text-xs font-bold" style={{ color: CATEGORY_COLORS[tx.category] ?? "#B5AFA6" }}>
-                        {tx.category.charAt(0)}
-                      </span>
+                      {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                    <div className="flex gap-2">
+                      <button onClick={saveEdit} className="flex items-center gap-1 bg-[#6B9B7A] text-white px-3 py-1.5 rounded-lg text-xs font-medium">
+                        <Check size={14} /> Save
+                      </button>
+                      <button onClick={() => setEditingId(null)} className="flex items-center gap-1 bg-[#F5F0EB] text-[#5C5549] px-3 py-1.5 rounded-lg text-xs font-medium">
+                        <X size={14} /> Cancel
+                      </button>
                     </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-[#2D2D2D] truncate">{tx.description}</p>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-[10px] text-[#B5AFA6]">{tx.date}</span>
-                        <span
-                          className="text-[10px] font-medium px-1.5 py-0.5 rounded-full"
-                          style={{
-                            backgroundColor: (CATEGORY_COLORS[tx.category] ?? "#B5AFA6") + "15",
-                            color: CATEGORY_COLORS[tx.category] ?? "#B5AFA6",
-                          }}
-                        >
-                          {tx.category}
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div
+                        className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+                        style={{
+                          backgroundColor: (CATEGORY_COLORS[tx.category] ?? "#B5AFA6") + "18",
+                        }}
+                      >
+                        <span className="text-xs font-bold" style={{ color: CATEGORY_COLORS[tx.category] ?? "#B5AFA6" }}>
+                          {tx.category.charAt(0)}
                         </span>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-[#2D2D2D] truncate">{tx.description}</p>
+                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                          <span className="text-[10px] text-[#B5AFA6]">{tx.date}</span>
+                          <span
+                            className="text-[10px] font-medium px-1.5 py-0.5 rounded-full"
+                            style={{
+                              backgroundColor: (CATEGORY_COLORS[tx.category] ?? "#B5AFA6") + "15",
+                              color: CATEGORY_COLORS[tx.category] ?? "#B5AFA6",
+                            }}
+                          >
+                            {tx.category}
+                          </span>
+                          {!isManual && (
+                            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-[#7C8C6E]/10 text-[#7C8C6E] flex items-center gap-0.5">
+                              <FileText size={8} />
+                              e-statement
+                            </span>
+                          )}
+                          {isDupe && (
+                            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-[#D4A76A]/15 text-[#D4A76A]">
+                              Duplicate?
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0 ml-2">
+                      <div className="text-right">
+                        <p className={`text-sm font-semibold ${tx.amount >= 0 ? "text-[#6B9B7A]" : "text-[#C4756E]"}`}>
+                          {tx.amount >= 0 ? "+" : "-"}{formatCurrency(tx.amount, txCurrency)}
+                        </p>
+                        {!isManual && tx.balance !== 0 && (
+                          <p className="text-[10px] text-[#B5AFA6]">{currencySymbol(txCurrency)}{tx.balance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                        )}
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <button
+                          onClick={() => startEdit(tx.id)}
+                          className="p-1.5 text-[#B5AFA6] hover:text-[#7C8C6E] hover:bg-[#7C8C6E]/10 rounded-lg transition-colors"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        {isManual && (
+                          <button
+                            onClick={() => dispatch({ type: "DELETE_TRANSACTION", payload: tx.id })}
+                            className="p-1.5 text-[#B5AFA6] hover:text-[#C4756E] hover:bg-[#C4756E]/10 rounded-lg transition-colors"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0 ml-2">
-                    <div className="text-right">
-                      <p className={`text-sm font-semibold ${tx.amount >= 0 ? "text-[#6B9B7A]" : "text-[#C4756E]"}`}>
-                        {tx.amount >= 0 ? "+" : "-"}${Math.abs(tx.amount).toFixed(2)}
-                      </p>
-                      {tx.statementId !== "manual" && (
-                        <p className="text-[10px] text-[#B5AFA6]">${tx.balance.toFixed(2)}</p>
-                      )}
-                    </div>
-                    <button
-                      onClick={() => startEdit(tx.id)}
-                      className="p-1.5 text-[#B5AFA6] hover:text-[#7C8C6E] hover:bg-[#7C8C6E]/10 rounded-lg transition-colors"
-                    >
-                      <Pencil size={14} />
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

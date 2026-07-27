@@ -100,10 +100,44 @@ function parseLineItems(items: TextItem[]): ParsedLine | null {
   };
 }
 
+function detectYearFromText(text: string): number {
+  const statementMatch = text.match(
+    /Statement\s+from\s+\d{2}\/\d{2}\/(\d{2,4})/i
+  );
+  if (statementMatch) {
+    let y = parseInt(statementMatch[1]);
+    if (y < 100) y += 2000;
+    return y;
+  }
+
+  const thruMatch = text.match(/Thru\s+\d{2}\/\d{2}\/(\d{2,4})/i);
+  if (thruMatch) {
+    let y = parseInt(thruMatch[1]);
+    if (y < 100) y += 2000;
+    return y;
+  }
+
+  const monthYearMatch = text.match(
+    /(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+(\d{4})/i
+  );
+  if (monthYearMatch) {
+    const y = parseInt(monthYearMatch[1]);
+    if (y >= 2000 && y <= 2099) return y;
+  }
+
+  const slashDateMatch = text.match(/\d{2}\/\d{2}\/(\d{4})/);
+  if (slashDateMatch) {
+    const y = parseInt(slashDateMatch[1]);
+    if (y >= 2000 && y <= 2099) return y;
+  }
+
+  return 0;
+}
+
 export async function parsePdfFile(
   file: File,
   statementId: string
-): Promise<{ transactions: Transaction[]; text: string }> {
+): Promise<{ transactions: Transaction[]; text: string; year: number }> {
   // @ts-expect-error -- load worker on main thread to avoid iOS Safari Worker issues
   globalThis.pdfjsWorker = await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
   const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
@@ -112,11 +146,10 @@ export async function parsePdfFile(
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
 
-  const allTransactions: Transaction[] = [];
   const allText: string[] = [];
-  let year = new Date().getFullYear();
-  let seqCounter = 0;
+  const pageData: { lineGroups: TextItem[][] }[] = [];
 
+  // First pass: extract all text and detect the year
   for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
     const page = await pdf.getPage(pageNum);
     const content = await page.getTextContent();
@@ -129,6 +162,7 @@ export async function parsePdfFile(
       });
 
     const lineGroups = groupIntoLines(items);
+    pageData.push({ lineGroups });
 
     for (const lineItems of lineGroups) {
       const lineText = lineItems
@@ -136,16 +170,18 @@ export async function parsePdfFile(
         .map((i) => i.text)
         .join(" ");
       allText.push(lineText);
-
-      const statementMatch = lineText.match(
-        /Statement\s+from\s+(\d{2})\/(\d{2})\/(\d{2,4})/i
-      );
-      if (statementMatch) {
-        year = parseInt(statementMatch[3]);
-        if (year < 100) year += 2000;
-      }
     }
+  }
 
+  const fullText = allText.join("\n");
+  let year = detectYearFromText(fullText);
+  if (year === 0) year = new Date().getFullYear();
+
+  // Second pass: parse transactions using the detected year
+  const allTransactions: Transaction[] = [];
+  let seqCounter = 0;
+
+  for (const { lineGroups } of pageData) {
     for (const lineItems of lineGroups) {
       const parsed = parseLineItems(lineItems);
       if (!parsed) continue;
@@ -163,6 +199,7 @@ export async function parsePdfFile(
           category: "Adjustments",
           statementId,
           seq: seqCounter++,
+          source: "statement",
         });
         continue;
       }
@@ -181,11 +218,12 @@ export async function parsePdfFile(
         category: categorizeTransaction(parsed.description),
         statementId,
         seq: seqCounter++,
+        source: "statement",
       });
     }
   }
 
-  return { transactions: allTransactions, text: allText.join("\n") };
+  return { transactions: allTransactions, text: fullText, year };
 }
 
 export function detectStatementPeriod(

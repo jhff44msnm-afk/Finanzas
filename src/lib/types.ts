@@ -1,3 +1,17 @@
+export type AccountType = "us" | "mx";
+
+export interface Account {
+  id: string;
+  name: string;
+  bankName: string;
+  type: AccountType;
+  currency: "USD" | "MXN";
+  routingNumber?: string;
+  accountNumber?: string;
+  cuentaNumber?: string;
+  clabeNumber?: string;
+}
+
 export interface Transaction {
   id: string;
   date: string;
@@ -7,6 +21,8 @@ export interface Transaction {
   category: string;
   statementId: string;
   seq: number;
+  accountId?: string;
+  source?: "statement" | "manual";
 }
 
 export interface Statement {
@@ -16,6 +32,7 @@ export interface Statement {
   periodStart: string;
   periodEnd: string;
   transactionCount: number;
+  accountId?: string;
 }
 
 export interface Goal {
@@ -47,9 +64,30 @@ export interface InsurancePolicy {
   nextPaymentDate: string;
 }
 
+export interface RecurringBill {
+  id: string;
+  name: string;
+  amount: number;
+  frequency: "weekly" | "biweekly" | "monthly";
+  dueDay: number;
+  category: string;
+  accountId?: string;
+}
+
+export interface BillPayment {
+  id: string;
+  billId: string;
+  paidDate: string;
+  dueDate: string;
+  amount: number;
+  onTime: boolean;
+}
+
 export type AppView =
   | "dashboard"
   | "transactions"
+  | "insights"
   | "goals"
   | "investments"
-  | "statements";
+  | "statements"
+  | "budget";
