@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Upload, FileText, Trash2, AlertCircle, CheckCircle2, Loader2, Landmark, AlertTriangle, Download, UploadCloud } from "lucide-react";
+import { Upload, FileText, Trash2, AlertCircle, CheckCircle2, Loader2, Landmark, AlertTriangle, Download, UploadCloud, Camera } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import { useAppState, useAppDispatch } from "@/lib/store";
-import type { Transaction, Statement } from "@/lib/types";
+import type { Transaction, Statement, Account } from "@/lib/types";
 import { parsePdfFile, detectStatementPeriod } from "@/lib/pdf-parser";
 import { parseBbvaPdf, isBbvaPdf } from "@/lib/bbva-parser";
+import { parseScreenshot, fileToBase64, resolveMediaType, type ExtractedTransaction } from "@/lib/screenshot-parser";
+import { categorizeTransaction } from "@/lib/categories";
 
 interface PendingUpload {
   statement: Statement;
@@ -404,10 +406,289 @@ export default function StatementsView() {
         </p>
       </div>
 
+      <ScreenshotImport
+        dispatch={dispatch}
+        accounts={accounts}
+        activeAccountId={activeAccountId}
+      />
+
       <DataBackup dispatch={dispatch} onMessage={(msg, isError) => {
         if (isError) { setError(msg); setSuccess(null); }
         else { setSuccess(msg); setError(null); }
       }} />
+    </div>
+  );
+}
+
+const API_KEY_STORAGE = "finanzas-anthropic-key";
+
+function ScreenshotImport({
+  dispatch,
+  accounts,
+  activeAccountId,
+}: {
+  dispatch: ReturnType<typeof useAppDispatch>;
+  accounts: Account[];
+  activeAccountId: string;
+}) {
+  const [apiKey, setApiKey] = useState(() =>
+    typeof window !== "undefined" ? (localStorage.getItem(API_KEY_STORAGE) ?? "") : ""
+  );
+  const [keyInput, setKeyInput] = useState("");
+  const [editingKey, setEditingKey] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [extracted, setExtracted] = useState<ExtractedTransaction[] | null>(null);
+  const [imageName, setImageName] = useState("");
+  const [targetAccountId, setTargetAccountId] = useState(() =>
+    activeAccountId !== "all" ? activeAccountId : (accounts[0]?.id ?? "")
+  );
+  const [imgDragOver, setImgDragOver] = useState(false);
+
+  const saveApiKey = (key: string) => {
+    localStorage.setItem(API_KEY_STORAGE, key);
+    setApiKey(key);
+    setEditingKey(false);
+    setKeyInput("");
+  };
+
+  const processImage = async (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      setError("Please select an image file (JPEG, PNG, or WEBP).");
+      return;
+    }
+    setProcessing(true);
+    setError(null);
+    setSuccess(null);
+    setExtracted(null);
+    setImageName(file.name);
+    try {
+      const base64 = await fileToBase64(file);
+      const mediaType = resolveMediaType(file);
+      const txns = await parseScreenshot(base64, mediaType, apiKey);
+      if (txns.length === 0) {
+        setError("No transactions found. Try a clearer or closer screenshot.");
+        return;
+      }
+      setExtracted(txns);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to process image");
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const confirmImport = () => {
+    if (!extracted || extracted.length === 0) return;
+    const statementId = uuidv4();
+    const today = new Date().toISOString().slice(0, 10);
+    const validDates = extracted
+      .map((t) => t.date)
+      .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+      .sort();
+    const periodStart = validDates[0] ?? today;
+    const periodEnd = validDates[validDates.length - 1] ?? today;
+    const targetId = targetAccountId || undefined;
+
+    const taggedTransactions: Transaction[] = extracted.map((t, i) => ({
+      id: uuidv4(),
+      date: t.date || today,
+      description: t.description,
+      amount: t.amount,
+      balance: t.balance ?? 0,
+      category: categorizeTransaction(t.description),
+      statementId,
+      seq: i,
+      accountId: targetId,
+      source: "statement" as const,
+    }));
+
+    const statement: Statement = {
+      id: statementId,
+      fileName: imageName || "screenshot",
+      uploadDate: today,
+      periodStart,
+      periodEnd,
+      transactionCount: extracted.length,
+      accountId: targetId,
+    };
+
+    dispatch({ type: "ADD_STATEMENT", payload: statement });
+    dispatch({ type: "ADD_TRANSACTIONS", payload: taggedTransactions });
+    setSuccess(`Imported ${extracted.length} transactions.`);
+    setExtracted(null);
+    setImageName("");
+  };
+
+  const handleImgDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setImgDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file) processImage(file);
+  };
+
+  return (
+    <div className="bg-white rounded-2xl border border-[#E8E2DA] p-4 space-y-3">
+      <div className="flex items-center gap-2.5">
+        <div className="w-8 h-8 rounded-lg bg-[#9B7EB5]/10 flex items-center justify-center shrink-0">
+          <Camera size={16} className="text-[#9B7EB5]" />
+        </div>
+        <div>
+          <h3 className="text-sm font-semibold text-[#2D2D2D]">AI Screenshot Import</h3>
+          <p className="text-xs text-[#B5AFA6]">Read transactions from any bank screenshot</p>
+        </div>
+      </div>
+
+      {!apiKey || editingKey ? (
+        <div className="space-y-2">
+          <p className="text-xs text-[#8B8578] leading-relaxed">
+            Enter your Anthropic API key to enable AI-powered screenshot reading.
+            Stored only in this browser, never sent to our servers.
+          </p>
+          <div className="flex gap-2">
+            <input
+              type="password"
+              value={keyInput}
+              onChange={(e) => setKeyInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && keyInput.trim() && saveApiKey(keyInput.trim())}
+              placeholder="sk-ant-..."
+              className="flex-1 text-xs border border-[#E8E2DA] rounded-xl px-3 py-2 outline-none focus:border-[#9B7EB5] bg-[#F5F0EB]"
+            />
+            <button
+              onClick={() => { if (keyInput.trim()) saveApiKey(keyInput.trim()); }}
+              disabled={!keyInput.trim()}
+              className="bg-[#9B7EB5] text-white px-3 py-2 rounded-xl text-xs font-medium hover:bg-[#8B6EA5] disabled:opacity-40 transition-colors"
+            >
+              Save
+            </button>
+            {editingKey && (
+              <button
+                onClick={() => { setEditingKey(false); setKeyInput(""); }}
+                className="text-[#B5AFA6] px-2 py-2 rounded-xl text-xs hover:bg-[#F5F0EB] transition-colors"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-[#8B8578]">
+              API key: <span className="font-mono text-[#2D2D2D]">sk-ant-···{apiKey.slice(-4)}</span>
+            </span>
+            <button
+              onClick={() => { setEditingKey(true); setKeyInput(""); }}
+              className="text-[#9B7EB5] hover:underline"
+            >
+              Change
+            </button>
+          </div>
+
+          {!extracted && !processing && (
+            <div
+              className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
+                imgDragOver ? "border-[#9B7EB5] bg-[#9B7EB5]/5" : "border-[#E8E2DA] hover:border-[#B5AFA6]"
+              }`}
+              onDragOver={(e) => { e.preventDefault(); setImgDragOver(true); }}
+              onDragLeave={() => setImgDragOver(false)}
+              onDrop={handleImgDrop}
+            >
+              <label className="flex flex-col items-center gap-2 cursor-pointer">
+                <Camera size={22} className="text-[#9B7EB5]/50" />
+                <div>
+                  <p className="text-sm font-medium text-[#2D2D2D]">Drop a screenshot here</p>
+                  <p className="text-xs text-[#B5AFA6] mt-0.5">or tap to select &middot; JPG, PNG, WEBP</p>
+                </div>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) processImage(file);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+            </div>
+          )}
+
+          {processing && (
+            <div className="flex flex-col items-center gap-3 py-5">
+              <Loader2 size={26} className="text-[#9B7EB5] animate-spin" />
+              <p className="text-sm text-[#8B8578]">Reading &ldquo;{imageName}&rdquo;&hellip;</p>
+            </div>
+          )}
+
+          {extracted && !processing && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-[#2D2D2D]">
+                  {extracted.length} transaction{extracted.length !== 1 ? "s" : ""} found
+                </p>
+                <button
+                  onClick={() => { setExtracted(null); setImageName(""); setError(null); }}
+                  className="text-xs text-[#B5AFA6] hover:text-[#C4756E] transition-colors"
+                >
+                  Discard
+                </button>
+              </div>
+
+              {accounts.length > 1 && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-[#8B8578] shrink-0">Import to:</span>
+                  <select
+                    value={targetAccountId}
+                    onChange={(e) => setTargetAccountId(e.target.value)}
+                    className="flex-1 text-xs border border-[#E8E2DA] rounded-lg px-2 py-1.5 bg-[#F5F0EB] outline-none"
+                  >
+                    {accounts.map((acc) => (
+                      <option key={acc.id} value={acc.id}>{acc.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="max-h-60 overflow-y-auto space-y-1 pr-0.5">
+                {extracted.map((t, i) => (
+                  <div key={i} className="flex items-center justify-between px-3 py-2 rounded-lg bg-[#F5F0EB] gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium text-[#2D2D2D] truncate">{t.description || "—"}</p>
+                      <p className="text-[11px] text-[#B5AFA6]">{t.date}</p>
+                    </div>
+                    <span className={`text-xs font-semibold shrink-0 ${t.amount >= 0 ? "text-[#6B9B7A]" : "text-[#2D2D2D]"}`}>
+                      {t.amount >= 0 ? "+" : ""}{Math.abs(t.amount).toFixed(2)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <button
+                onClick={confirmImport}
+                className="w-full bg-[#9B7EB5] text-white py-2.5 rounded-xl text-sm font-medium hover:bg-[#8B6EA5] transition-colors"
+              >
+                Import {extracted.length} Transaction{extracted.length !== 1 ? "s" : ""}
+              </button>
+            </div>
+          )}
+
+          {error && (
+            <div className="flex items-center gap-2 text-[#C4756E] text-xs bg-[#C4756E]/8 px-3 py-2 rounded-lg border border-[#C4756E]/20">
+              <AlertCircle size={13} className="shrink-0" />
+              {error}
+            </div>
+          )}
+
+          {success && (
+            <div className="flex items-center gap-2 text-[#6B9B7A] text-xs bg-[#6B9B7A]/8 px-3 py-2 rounded-lg border border-[#6B9B7A]/20">
+              <CheckCircle2 size={13} className="shrink-0" />
+              {success}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
