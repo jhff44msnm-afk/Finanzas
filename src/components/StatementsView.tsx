@@ -7,7 +7,7 @@ import { useAppState, useAppDispatch } from "@/lib/store";
 import type { Transaction, Statement, Account } from "@/lib/types";
 import { parsePdfFile, detectStatementPeriod } from "@/lib/pdf-parser";
 import { parseBbvaPdf, isBbvaPdf } from "@/lib/bbva-parser";
-import { parseScreenshot, fileToBase64, resolveMediaType, type ExtractedTransaction } from "@/lib/screenshot-parser";
+import { parseScreenshot, fileToBase64, resolveMediaType, type ExtractedTransaction, type AiProvider } from "@/lib/screenshot-parser";
 import { categorizeTransaction } from "@/lib/categories";
 
 interface PendingUpload {
@@ -420,7 +420,9 @@ export default function StatementsView() {
   );
 }
 
-const API_KEY_STORAGE = "finanzas-anthropic-key";
+const CLAUDE_KEY = "finanzas-anthropic-key";
+const GEMINI_KEY = "finanzas-gemini-key";
+const AI_PROVIDER = "finanzas-ai-provider";
 
 function ScreenshotImport({
   dispatch,
@@ -431,8 +433,14 @@ function ScreenshotImport({
   accounts: Account[];
   activeAccountId: string;
 }) {
-  const [apiKey, setApiKey] = useState(() =>
-    typeof window !== "undefined" ? (localStorage.getItem(API_KEY_STORAGE) ?? "") : ""
+  const [provider, setProvider] = useState<AiProvider>(() =>
+    (typeof window !== "undefined" ? localStorage.getItem(AI_PROVIDER) : null) as AiProvider ?? "gemini"
+  );
+  const [claudeKey, setClaudeKey] = useState(() =>
+    typeof window !== "undefined" ? (localStorage.getItem(CLAUDE_KEY) ?? "") : ""
+  );
+  const [geminiKey, setGeminiKey] = useState(() =>
+    typeof window !== "undefined" ? (localStorage.getItem(GEMINI_KEY) ?? "") : ""
   );
   const [keyInput, setKeyInput] = useState("");
   const [editingKey, setEditingKey] = useState(false);
@@ -446,16 +454,30 @@ function ScreenshotImport({
   );
   const [imgDragOver, setImgDragOver] = useState(false);
 
-  const saveApiKey = (key: string) => {
-    localStorage.setItem(API_KEY_STORAGE, key);
-    setApiKey(key);
+  const activeKey = provider === "gemini" ? geminiKey : claudeKey;
+  const storageKey = provider === "gemini" ? GEMINI_KEY : CLAUDE_KEY;
+
+  const switchProvider = (p: AiProvider) => {
+    setProvider(p);
+    localStorage.setItem(AI_PROVIDER, p);
+    setEditingKey(false);
+    setKeyInput("");
+    setError(null);
+    setSuccess(null);
+    setExtracted(null);
+  };
+
+  const saveKey = (key: string) => {
+    localStorage.setItem(storageKey, key);
+    if (provider === "gemini") setGeminiKey(key);
+    else setClaudeKey(key);
     setEditingKey(false);
     setKeyInput("");
   };
 
   const processImage = async (file: File) => {
     if (!file.type.startsWith("image/")) {
-      setError("Please select an image file (JPEG, PNG, or WEBP).");
+      setError("Selecciona una imagen (JPG, PNG o WEBP).");
       return;
     }
     setProcessing(true);
@@ -466,14 +488,14 @@ function ScreenshotImport({
     try {
       const base64 = await fileToBase64(file);
       const mediaType = resolveMediaType(file);
-      const txns = await parseScreenshot(base64, mediaType, apiKey);
+      const txns = await parseScreenshot(base64, mediaType, activeKey, provider);
       if (txns.length === 0) {
-        setError("No transactions found. Try a clearer or closer screenshot.");
+        setError("No se encontraron transacciones. Intenta con un screenshot más claro.");
         return;
       }
       setExtracted(txns);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to process image");
+      setError(err instanceof Error ? err.message : "Error al procesar la imagen");
     } finally {
       setProcessing(false);
     }
@@ -483,10 +505,7 @@ function ScreenshotImport({
     if (!extracted || extracted.length === 0) return;
     const statementId = uuidv4();
     const today = new Date().toISOString().slice(0, 10);
-    const validDates = extracted
-      .map((t) => t.date)
-      .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
-      .sort();
+    const validDates = extracted.map((t) => t.date).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
     const periodStart = validDates[0] ?? today;
     const periodEnd = validDates[validDates.length - 1] ?? today;
     const targetId = targetAccountId || undefined;
@@ -516,58 +535,82 @@ function ScreenshotImport({
 
     dispatch({ type: "ADD_STATEMENT", payload: statement });
     dispatch({ type: "ADD_TRANSACTIONS", payload: taggedTransactions });
-    setSuccess(`Imported ${extracted.length} transactions.`);
+    setSuccess(`${extracted.length} transacciones importadas.`);
     setExtracted(null);
     setImageName("");
   };
 
-  const handleImgDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setImgDragOver(false);
-    const file = e.dataTransfer.files[0];
-    if (file) processImage(file);
-  };
+  const providerLabel = provider === "gemini" ? "Google Gemini" : "Anthropic Claude";
+  const keyPlaceholder = provider === "gemini" ? "AIza..." : "sk-ant-...";
+  const keyPrefix = provider === "gemini"
+    ? `AIza···${activeKey.slice(-4)}`
+    : `sk-ant-···${activeKey.slice(-4)}`;
 
   return (
     <div className="bg-white rounded-2xl border border-[#E8E2DA] p-4 space-y-3">
+      {/* Header */}
       <div className="flex items-center gap-2.5">
         <div className="w-8 h-8 rounded-lg bg-[#9B7EB5]/10 flex items-center justify-center shrink-0">
           <Camera size={16} className="text-[#9B7EB5]" />
         </div>
         <div>
           <h3 className="text-sm font-semibold text-[#2D2D2D]">AI Screenshot Import</h3>
-          <p className="text-xs text-[#B5AFA6]">Read transactions from any bank screenshot</p>
+          <p className="text-xs text-[#B5AFA6]">Lee transacciones de cualquier screenshot bancario</p>
         </div>
       </div>
 
-      {!apiKey || editingKey ? (
+      {/* Provider toggle */}
+      <div className="flex bg-[#F5F0EB] rounded-xl p-0.5 gap-0.5">
+        {(["gemini", "claude"] as AiProvider[]).map((p) => (
+          <button
+            key={p}
+            onClick={() => switchProvider(p)}
+            className={`flex-1 py-1.5 rounded-[10px] text-xs font-semibold transition-all ${
+              provider === p
+                ? "bg-white text-[#2D2D2D] shadow-sm"
+                : "text-[#8B8578] hover:text-[#5C5549]"
+            }`}
+          >
+            {p === "gemini" ? "Google Gemini" : "Claude"}
+          </button>
+        ))}
+      </div>
+
+      {/* Key info badge */}
+      {provider === "gemini" && !activeKey && (
+        <p className="text-[11px] text-[#6B9B7A] bg-[#6B9B7A]/8 rounded-lg px-3 py-1.5 leading-relaxed">
+          ✓ Gratis — consigue tu key en <strong>aistudio.google.com</strong> con tu cuenta Google
+        </p>
+      )}
+
+      {/* API key setup */}
+      {!activeKey || editingKey ? (
         <div className="space-y-2">
-          <p className="text-xs text-[#8B8578] leading-relaxed">
-            Enter your Anthropic API key to enable AI-powered screenshot reading.
-            Stored only in this browser, never sent to our servers.
+          <p className="text-xs text-[#8B8578]">
+            Ingresa tu API key de <strong>{providerLabel}</strong>. Se guarda solo en este navegador.
           </p>
           <div className="flex gap-2">
             <input
               type="password"
               value={keyInput}
               onChange={(e) => setKeyInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && keyInput.trim() && saveApiKey(keyInput.trim())}
-              placeholder="sk-ant-..."
+              onKeyDown={(e) => e.key === "Enter" && keyInput.trim() && saveKey(keyInput.trim())}
+              placeholder={keyPlaceholder}
               className="flex-1 text-xs border border-[#E8E2DA] rounded-xl px-3 py-2 outline-none focus:border-[#9B7EB5] bg-[#F5F0EB]"
             />
             <button
-              onClick={() => { if (keyInput.trim()) saveApiKey(keyInput.trim()); }}
+              onClick={() => { if (keyInput.trim()) saveKey(keyInput.trim()); }}
               disabled={!keyInput.trim()}
               className="bg-[#9B7EB5] text-white px-3 py-2 rounded-xl text-xs font-medium hover:bg-[#8B6EA5] disabled:opacity-40 transition-colors"
             >
-              Save
+              Guardar
             </button>
             {editingKey && (
               <button
                 onClick={() => { setEditingKey(false); setKeyInput(""); }}
                 className="text-[#B5AFA6] px-2 py-2 rounded-xl text-xs hover:bg-[#F5F0EB] transition-colors"
               >
-                Cancel
+                Cancelar
               </button>
             )}
           </div>
@@ -576,16 +619,17 @@ function ScreenshotImport({
         <>
           <div className="flex items-center justify-between text-xs">
             <span className="text-[#8B8578]">
-              API key: <span className="font-mono text-[#2D2D2D]">sk-ant-···{apiKey.slice(-4)}</span>
+              Key: <span className="font-mono text-[#2D2D2D]">{keyPrefix}</span>
             </span>
             <button
               onClick={() => { setEditingKey(true); setKeyInput(""); }}
               className="text-[#9B7EB5] hover:underline"
             >
-              Change
+              Cambiar
             </button>
           </div>
 
+          {/* Image drop zone */}
           {!extracted && !processing && (
             <div
               className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
@@ -593,23 +637,19 @@ function ScreenshotImport({
               }`}
               onDragOver={(e) => { e.preventDefault(); setImgDragOver(true); }}
               onDragLeave={() => setImgDragOver(false)}
-              onDrop={handleImgDrop}
+              onDrop={(e) => { e.preventDefault(); setImgDragOver(false); const f = e.dataTransfer.files[0]; if (f) processImage(f); }}
             >
               <label className="flex flex-col items-center gap-2 cursor-pointer">
                 <Camera size={22} className="text-[#9B7EB5]/50" />
                 <div>
-                  <p className="text-sm font-medium text-[#2D2D2D]">Drop a screenshot here</p>
-                  <p className="text-xs text-[#B5AFA6] mt-0.5">or tap to select &middot; JPG, PNG, WEBP</p>
+                  <p className="text-sm font-medium text-[#2D2D2D]">Sube un screenshot aquí</p>
+                  <p className="text-xs text-[#B5AFA6] mt-0.5">o toca para seleccionar &middot; JPG, PNG, WEBP</p>
                 </div>
                 <input
                   type="file"
                   accept="image/*"
                   className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) processImage(file);
-                    e.target.value = "";
-                  }}
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) processImage(f); e.target.value = ""; }}
                 />
               </label>
             </div>
@@ -618,7 +658,7 @@ function ScreenshotImport({
           {processing && (
             <div className="flex flex-col items-center gap-3 py-5">
               <Loader2 size={26} className="text-[#9B7EB5] animate-spin" />
-              <p className="text-sm text-[#8B8578]">Reading &ldquo;{imageName}&rdquo;&hellip;</p>
+              <p className="text-sm text-[#8B8578]">Leyendo &ldquo;{imageName}&rdquo;&hellip;</p>
             </div>
           )}
 
@@ -626,19 +666,19 @@ function ScreenshotImport({
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <p className="text-sm font-semibold text-[#2D2D2D]">
-                  {extracted.length} transaction{extracted.length !== 1 ? "s" : ""} found
+                  {extracted.length} transacci{extracted.length !== 1 ? "ones" : "ón"} encontrada{extracted.length !== 1 ? "s" : ""}
                 </p>
                 <button
                   onClick={() => { setExtracted(null); setImageName(""); setError(null); }}
                   className="text-xs text-[#B5AFA6] hover:text-[#C4756E] transition-colors"
                 >
-                  Discard
+                  Descartar
                 </button>
               </div>
 
               {accounts.length > 1 && (
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-[#8B8578] shrink-0">Import to:</span>
+                  <span className="text-xs text-[#8B8578] shrink-0">Importar a:</span>
                   <select
                     value={targetAccountId}
                     onChange={(e) => setTargetAccountId(e.target.value)}
@@ -669,7 +709,7 @@ function ScreenshotImport({
                 onClick={confirmImport}
                 className="w-full bg-[#9B7EB5] text-white py-2.5 rounded-xl text-sm font-medium hover:bg-[#8B6EA5] transition-colors"
               >
-                Import {extracted.length} Transaction{extracted.length !== 1 ? "s" : ""}
+                Importar {extracted.length} transacci{extracted.length !== 1 ? "ones" : "ón"}
               </button>
             </div>
           )}
