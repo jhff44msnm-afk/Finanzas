@@ -5,7 +5,7 @@ import { Upload, FileText, Trash2, AlertCircle, CheckCircle2, Loader2, Landmark,
 import { v4 as uuidv4 } from "uuid";
 import { useAppState, useAppDispatch } from "@/lib/store";
 import type { Transaction, Statement, Account } from "@/lib/types";
-import { parsePdfFile, detectStatementPeriod } from "@/lib/pdf-parser";
+import { parsePdfFile, detectStatementPeriod, isGecuHistoryPdf, parseGecuHistoryPdf } from "@/lib/pdf-parser";
 import { parseBbvaPdf, isBbvaPdf } from "@/lib/bbva-parser";
 import { parseScreenshot, fileToBase64, resolveMediaType, type ExtractedTransaction, type AiProvider } from "@/lib/screenshot-parser";
 import { categorizeTransaction } from "@/lib/categories";
@@ -76,8 +76,77 @@ export default function StatementsView() {
         }
 
         const isBbva = isBbvaPdf(sampleText);
+        const isGecuHistory = isGecuHistoryPdf(sampleText);
 
-        if (isBbva) {
+        if (isGecuHistory) {
+          const { transactions: parsed, periodStart, periodEnd } = await parseGecuHistoryPdf(file, statementId);
+
+          if (parsed.length === 0) {
+            setError("No transactions found in this GECU account history export.");
+            setUploading(false);
+            return;
+          }
+
+          let targetAccountId = activeAccountId !== "all" ? activeAccountId : undefined;
+          if (!targetAccountId) {
+            const existing = accounts.find((a) => a.type === "us");
+            if (existing) {
+              targetAccountId = existing.id;
+            } else {
+              const newAccount = {
+                id: uuidv4(),
+                name: "GECU Checking",
+                bankName: "GECU Federal Credit Union",
+                type: "us" as const,
+                currency: "USD" as const,
+              };
+              dispatch({ type: "ADD_ACCOUNT", payload: newAccount });
+              targetAccountId = newAccount.id;
+              if (accounts.length === 0) {
+                dispatch({ type: "SET_ACTIVE_ACCOUNT", payload: newAccount.id });
+              }
+            }
+          }
+
+          const taggedTransactions = parsed.map((t) => ({
+            ...t,
+            accountId: targetAccountId,
+            source: "statement" as const,
+          }));
+
+          const statement: Statement = {
+            id: statementId,
+            fileName: file.name,
+            uploadDate: new Date().toISOString().slice(0, 10),
+            periodStart,
+            periodEnd,
+            transactionCount: parsed.length,
+            accountId: targetAccountId,
+          };
+
+          const conflictingManualIds = transactions
+            .filter(
+              (t) =>
+                t.source === "manual" &&
+                (t.accountId === targetAccountId || !t.accountId) &&
+                t.date >= periodStart &&
+                t.date <= periodEnd
+            )
+            .map((t) => t.id);
+
+          const pending: PendingUpload = {
+            statement,
+            taggedTransactions,
+            conflictingManualIds,
+            successMsg: `Imported ${parsed.length} transactions from GECU account history "${file.name}".`,
+          };
+
+          if (conflictingManualIds.length > 0) {
+            setPendingUpload(pending);
+          } else {
+            finalizeUpload(pending, false);
+          }
+        } else if (isBbva) {
           const { transactions: parsed, accountInfo } = await parseBbvaPdf(file, statementId);
 
           if (parsed.length === 0) {
@@ -401,7 +470,7 @@ export default function StatementsView() {
         </h3>
         <p className="text-xs text-[#B5AFA6] leading-relaxed">
           GECU Federal Credit Union (USD) and BBVA México (MXN) statements in PDF format.
-          The parser auto-detects the bank and reads transactions automatically.
+          The parser auto-detects the format — official GECU statements, GECU account history exports, and BBVA México statements are all supported.
           You can upload multiple files at once.
         </p>
       </div>
