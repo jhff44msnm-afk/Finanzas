@@ -226,6 +226,128 @@ export async function parsePdfFile(
   return { transactions: allTransactions, text: fullText, year };
 }
 
+// ---- GECU Account History (web export) parser ----
+
+const GECU_HIST_SKIP = new Set([
+  "Menu", "Account History", "Switch Account", "Account Details",
+  "Available Balance", "Balance", "Transfer", "Bill Pay",
+  "Card Management", "eStatements", "Text Alerts", "Sort By",
+  "Search", "Filters", "DATE (Newest)", "Description", "Amount",
+  "Pending", "Posted", "'",
+  "You've reached the end of your transaction history in your search window.",
+]);
+const GECU_HIST_SKIP_RE = [
+  /^Checking \*+\d+/,
+  /^Showing all transactions for/,
+  /^All Transaction Types,/,
+];
+
+const MONTH_MAP: Record<string, string> = {
+  Jan: "01", Feb: "02", Mar: "03", Apr: "04", May: "05", Jun: "06",
+  Jul: "07", Aug: "08", Sep: "09", Oct: "10", Nov: "11", Dec: "12",
+};
+
+function parseHistDate(s: string): string | null {
+  const m = s.trim().match(/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),\s+(\d{4})$/);
+  if (!m) return null;
+  return `${m[3]}-${MONTH_MAP[m[1]]}-${m[2].padStart(2, "0")}`;
+}
+
+function parseHistDollar(s: string): number | null {
+  const m = s.trim().match(/^(-?)\$([\d,]+\.?\d*)$/);
+  if (!m) return null;
+  const val = parseFloat(m[2].replace(/,/g, ""));
+  return m[1] === "-" ? -val : val;
+}
+
+export function isGecuHistoryPdf(text: string): boolean {
+  return text.includes("Account History") && text.includes("Showing all transactions for");
+}
+
+export async function parseGecuHistoryPdf(
+  file: File,
+  statementId: string
+): Promise<{ transactions: Transaction[]; periodStart: string; periodEnd: string }> {
+  // @ts-expect-error -- load worker on main thread to avoid iOS Safari Worker issues
+  globalThis.pdfjsWorker = await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
+  const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "data:,";
+
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+
+  interface RawItem { text: string; x: number; y: number; order: number }
+  const allItems: RawItem[] = [];
+  const textParts: string[] = [];
+
+  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+    const page = await pdf.getPage(pageNum);
+    const content = await page.getTextContent();
+    for (const item of content.items) {
+      if (!("str" in item)) continue;
+      const ti = item as { str: string; transform: number[] };
+      if (!ti.str.trim()) continue;
+      const x = Math.round(ti.transform[4]);
+      const y = Math.round(ti.transform[5]);
+      allItems.push({ text: ti.str, x, y, order: (pdf.numPages - pageNum) * 100000 + y });
+      textParts.push(ti.str);
+    }
+  }
+
+  // Process top-to-bottom; for same y, right-column items (high x) before left-column
+  allItems.sort((a, b) => b.order !== a.order ? b.order - a.order : b.x - a.x);
+
+  const fullText = textParts.join(" ");
+  const periodMatch = fullText.match(/(\d{2}\/\d{2}\/\d{4})\s+to\s+(\d{2}\/\d{2}\/\d{4})/);
+  const slashToIso = (s: string) => { const [m, d, y] = s.split("/"); return `${y}-${m}-${d}`; };
+  const periodStart = periodMatch ? slashToIso(periodMatch[1]) : "";
+  const periodEnd   = periodMatch ? slashToIso(periodMatch[2]) : "";
+
+  const transactions: Transaction[] = [];
+  let seq = 0;
+  let descParts: string[] = [];
+  let rightItems: { y: number; val: number }[] = [];
+  let maxDescY = -Infinity;
+
+  const flush = (dateStr: string) => {
+    const description = descParts.join(" ").trim();
+    const snapMaxDescY = maxDescY;
+    descParts = [];
+    maxDescY = -Infinity;
+    if (!description || !dateStr) { rightItems = []; return; }
+    // Only include right-column items at or below the topmost description line
+    const valid = rightItems.filter((r) => r.y <= snapMaxDescY).sort((a, b) => b.y - a.y);
+    rightItems = [];
+    const amount  = valid[0]?.val ?? 0;
+    const balance = valid[1]?.val ?? 0;
+    transactions.push({
+      id: uuidv4(), date: dateStr, description, amount, balance,
+      category: categorizeTransaction(description),
+      statementId, seq: seq++, source: "statement",
+    });
+  };
+
+  for (const { text, x, y } of allItems) {
+    const t = text.trim();
+    if (!t) continue;
+    if (GECU_HIST_SKIP.has(t) || GECU_HIST_SKIP_RE.some((r) => r.test(t))) continue;
+
+    const date = x < 150 ? parseHistDate(t) : null;
+    if (date !== null) { flush(date); continue; }
+
+    const dollar = x > 450 ? parseHistDollar(t) : null;
+    if (dollar !== null) { rightItems.push({ y, val: dollar }); continue; }
+
+    if (x < 400) {
+      descParts.push(t);
+      if (y > maxDescY) maxDescY = y;
+    }
+  }
+  flush(""); // discard any trailing partial block
+
+  return { transactions, periodStart, periodEnd };
+}
+
 export function detectStatementPeriod(
   text: string,
   year: number
