@@ -348,6 +348,131 @@ export async function parseGecuHistoryPdf(
   return { transactions, periodStart, periodEnd };
 }
 
+// ---- GECU PDF Print Export parser (second format) ----
+// Detected by "G E C U |" header and "CHECKING ****" account line.
+// Layout: date x≈79, description x≈154 (multi-line), amount x≈388, balance x≈490, all dollar values same y as date.
+
+export function isGecuPdfExport(text: string): boolean {
+  return text.includes("G E C U |") && /CHECKING \*+\d/.test(text);
+}
+
+const GECU_PDF_SKIP = new Set([
+  "DATE", "Description", "Amount", "Balance", "Posted", "Pending",
+  "Available Balance", "G E C U |",
+]);
+const GECU_PDF_SKIP_RE = [
+  /^CHECKING \*+\d*/i,
+  /^G E C U \|/,
+  /^Página \d+ de \d+$/,
+  /^https?:\/\//,
+  /^\d+ de \d+$/,
+  /^\(\d+ days?\)$/,
+];
+
+export async function parseGecuPdfExport(
+  file: File,
+  statementId: string
+): Promise<{ transactions: Transaction[]; periodStart: string; periodEnd: string }> {
+  // @ts-expect-error -- load worker on main thread to avoid iOS Safari Worker issues
+  globalThis.pdfjsWorker = await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
+  const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "data:,";
+
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+
+  interface PageItem { text: string; x: number; y: number; pageNum: number }
+  const allPageItems: PageItem[] = [];
+  const textParts: string[] = [];
+
+  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+    const page = await pdf.getPage(pageNum);
+    const content = await page.getTextContent();
+    for (const item of content.items) {
+      if (!("str" in item)) continue;
+      const ti = item as { str: string; transform: number[] };
+      if (!ti.str.trim()) continue;
+      const x = Math.round(ti.transform[4]);
+      const y = Math.round(ti.transform[5]);
+      allPageItems.push({ text: ti.str, x, y, pageNum });
+      textParts.push(ti.str);
+    }
+  }
+
+  const fullText = textParts.join(" ");
+
+  // Parse period: "Jul 1, 2026 - Jul 26, 2026" style
+  const periodM = fullText.match(/([A-Za-z]+ \d{1,2}, \d{4})\s*-\s*([A-Za-z]+ \d{1,2}, \d{4})/);
+  const periodStart = periodM ? (parseHistDate(periodM[1]) ?? "") : "";
+  const periodEnd = periodM ? (parseHistDate(periodM[2]) ?? "") : "";
+
+  const skipItem = (text: string) =>
+    GECU_PDF_SKIP.has(text) || GECU_PDF_SKIP_RE.some((r) => r.test(text));
+
+  const datePat = /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4}$/;
+
+  const transactions: Transaction[] = [];
+  let seq = 0;
+
+  // Process page by page to keep y-coordinates within page scope
+  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+    const pageItems = allPageItems.filter((i) => i.pageNum === pageNum && !skipItem(i.text));
+
+    // Date items: x in [70,100], matching date pattern
+    const dateItems = pageItems
+      .filter((i) => i.x >= 70 && i.x <= 100 && datePat.test(i.text.trim()))
+      .sort((a, b) => b.y - a.y); // top (high y) to bottom (low y)
+
+    if (dateItems.length === 0) continue;
+
+    for (let di = 0; di < dateItems.length; di++) {
+      const { y: dateY, text: dateText } = dateItems[di];
+      const dateStr = parseHistDate(dateText.trim());
+      if (!dateStr) continue;
+
+      // Y range: midpoint boundaries between consecutive dates
+      const yMax = di === 0 ? dateY + 80 : (dateItems[di - 1].y + dateY) / 2;
+      const yMin = di === dateItems.length - 1 ? dateY - 80 : (dateY + dateItems[di + 1].y) / 2;
+
+      const inRange = pageItems.filter((i) => i.y >= yMin && i.y <= yMax);
+
+      // Description: x in [140, 385], any y in range
+      const descParts = inRange
+        .filter((i) => i.x >= 140 && i.x <= 385)
+        .sort((a, b) => b.y - a.y)
+        .map((i) => i.text.trim())
+        .filter(Boolean);
+
+      // Amount: x in [370, 450], same y as date (±8)
+      const amountItem = inRange.find((i) => i.x >= 370 && i.x <= 450 && Math.abs(i.y - dateY) <= 8);
+      // Balance: x in [460, 560], same y as date (±8)
+      const balanceItem = inRange.find((i) => i.x >= 460 && i.x <= 560 && Math.abs(i.y - dateY) <= 8);
+
+      const amount = amountItem ? parseHistDollar(amountItem.text) : null;
+      const balance = balanceItem ? parseHistDollar(balanceItem.text) : null;
+
+      if (amount === null || balance === null) continue;
+
+      const description = descParts.join(" ").trim();
+      if (!description) continue;
+
+      transactions.push({
+        id: uuidv4(),
+        date: dateStr,
+        description,
+        amount,
+        balance,
+        category: categorizeTransaction(description),
+        statementId,
+        seq: seq++,
+        source: "statement",
+      });
+    }
+  }
+
+  return { transactions, periodStart, periodEnd };
+}
+
 export function detectStatementPeriod(
   text: string,
   year: number

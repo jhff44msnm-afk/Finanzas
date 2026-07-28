@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import {
   Plus,
   Trash2,
@@ -12,7 +12,6 @@ import {
   History,
   ChevronDown,
   ChevronUp,
-  TrendingDown,
   ShieldAlert,
   ShieldCheck,
   Zap,
@@ -20,6 +19,7 @@ import {
   Link2,
   EyeOff,
   Undo2,
+  Pencil,
 } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import { useAppState, useAppDispatch } from "@/lib/store";
@@ -73,34 +73,34 @@ function getNextDueDate(bill: RecurringBill): Date {
   const now = new Date();
   now.setHours(0, 0, 0, 0);
 
-  if (bill.frequency === "monthly") {
+  if (bill.frequency === "monthly" || bill.frequency === "custom") {
+    const months = bill.frequency === "custom" ? (bill.customMonths ?? 1) : 1;
     const due = new Date(now.getFullYear(), now.getMonth(), bill.dueDay);
-    if (due <= now) due.setMonth(due.getMonth() + 1);
+    if (due <= now) due.setMonth(due.getMonth() + months);
     return due;
   }
   if (bill.frequency === "biweekly") {
     const due = new Date(now.getFullYear(), now.getMonth(), bill.dueDay);
-    // Keep advancing by 14 days until we land in the future
     while (due <= now) due.setDate(due.getDate() + 14);
     return due;
   }
-  // weekly — next occurrence of the given day of week
+  // weekly
   const dayOfWeek = bill.dueDay % 7;
   const currentDay = now.getDay();
-  let daysUntil = (dayOfWeek - currentDay + 7) % 7 || 7;
+  const daysUntilDay = (dayOfWeek - currentDay + 7) % 7 || 7;
   const due = new Date(now);
-  due.setDate(now.getDate() + daysUntil);
+  due.setDate(now.getDate() + daysUntilDay);
   return due;
 }
 
-// The most recent cycle start (last time the bill was "due")
 function getLastDueDate(bill: RecurringBill): Date {
   const now = new Date();
   now.setHours(0, 0, 0, 0);
 
-  if (bill.frequency === "monthly") {
+  if (bill.frequency === "monthly" || bill.frequency === "custom") {
+    const months = bill.frequency === "custom" ? (bill.customMonths ?? 1) : 1;
     const due = new Date(now.getFullYear(), now.getMonth(), bill.dueDay);
-    if (due > now) due.setMonth(due.getMonth() - 1);
+    if (due > now) due.setMonth(due.getMonth() - months);
     return due;
   }
   if (bill.frequency === "biweekly") {
@@ -130,6 +130,18 @@ function formatDate(d: Date): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+function frequencyLabel(bill: RecurringBill): string {
+  if (bill.frequency === "custom") {
+    const m = bill.customMonths ?? 1;
+    if (m === 12) return "yearly";
+    if (m === 6) return "every 6 mo";
+    if (m === 4) return "every 4 mo";
+    if (m === 2) return "every 2 mo";
+    return `every ${m} mo`;
+  }
+  return bill.frequency;
+}
+
 // --- Ignored items localStorage helpers ---
 
 const IGNORED_KEY = "finanzas-ignored-recurring";
@@ -146,6 +158,107 @@ function saveIgnored(set: Set<string>) {
   try {
     localStorage.setItem(IGNORED_KEY, JSON.stringify([...set]));
   } catch {}
+}
+
+// --- Swipeable bill row ---
+
+function SwipeableRow({
+  children,
+  onEdit,
+  onDelete,
+  isOpen,
+  onOpen,
+  onClose,
+}: {
+  children: React.ReactNode;
+  onEdit: () => void;
+  onDelete: () => void;
+  isOpen: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+}) {
+  const OPEN_WIDTH = 128;
+  const THRESHOLD = 50;
+  const startXRef = useRef(0);
+  const currentOffsetRef = useRef(0);
+  const [offset, setOffset] = useState(0);
+  const [transitioning, setTransitioning] = useState(false);
+
+  useEffect(() => {
+    const target = isOpen ? -OPEN_WIDTH : 0;
+    if (currentOffsetRef.current !== target) {
+      setTransitioning(true);
+      setOffset(target);
+      currentOffsetRef.current = target;
+    }
+  }, [isOpen]);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    startXRef.current = e.touches[0].clientX;
+    setTransitioning(false);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    const dx = e.touches[0].clientX - startXRef.current;
+    const base = isOpen ? -OPEN_WIDTH : 0;
+    const next = Math.max(-OPEN_WIDTH, Math.min(0, base + dx));
+    setOffset(next);
+    currentOffsetRef.current = next;
+  };
+
+  const handleTouchEnd = () => {
+    setTransitioning(true);
+    const shouldOpen = currentOffsetRef.current < -THRESHOLD;
+    if (shouldOpen) {
+      setOffset(-OPEN_WIDTH);
+      currentOffsetRef.current = -OPEN_WIDTH;
+      onOpen();
+    } else {
+      setOffset(0);
+      currentOffsetRef.current = 0;
+      onClose();
+    }
+  };
+
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-[#E8E2DA]">
+      {/* Action buttons behind the card */}
+      <div
+        className="absolute right-0 inset-y-0 flex"
+        style={{ width: OPEN_WIDTH }}
+      >
+        <button
+          onClick={() => { onClose(); onEdit(); }}
+          className="w-1/2 flex flex-col items-center justify-center gap-1 bg-[#7C8C6E] hover:bg-[#6B7A5E] transition-colors"
+        >
+          <Pencil size={17} className="text-white" />
+          <span className="text-[10px] text-white font-medium">Edit</span>
+        </button>
+        <button
+          onClick={() => { onClose(); onDelete(); }}
+          className="w-1/2 flex flex-col items-center justify-center gap-1 bg-[#C4756E] hover:bg-[#B36358] transition-colors"
+        >
+          <Trash2 size={17} className="text-white" />
+          <span className="text-[10px] text-white font-medium">Delete</span>
+        </button>
+      </div>
+
+      {/* Main card content */}
+      <div
+        className="relative bg-white"
+        style={{
+          transform: `translateX(${offset}px)`,
+          transition: transitioning ? "transform 0.2s ease" : "none",
+        }}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onClick={() => { if (isOpen) { onClose(); } }}
+      >
+        {children}
+      </div>
+    </div>
+  );
 }
 
 // --- Detected Recurring Payments Section ---
@@ -388,7 +501,6 @@ function DetectedRecurring({
               </div>
             )}
 
-            {/* Action buttons */}
             <div className="flex gap-2">
               {!isIgnoredItem && !isLinked && (
                 <button
@@ -439,7 +551,6 @@ function DetectedRecurring({
         </div>
       </div>
 
-      {/* Priority filter pills */}
       <div className="flex gap-1.5 overflow-x-auto pb-1">
         {filterButtons.map((btn) => {
           const active = filter === btn.key;
@@ -475,7 +586,6 @@ function DetectedRecurring({
         })}
       </div>
 
-      {/* Active items grouped by priority */}
       {filter === "all" ? (
         (["Potentially Unnecessary", "Discretionary", "Important", "Essential"] as Priority[]).map(
           (priority) => {
@@ -510,7 +620,6 @@ function DetectedRecurring({
         </div>
       )}
 
-      {/* Ignored section */}
       {ignoredItems.length > 0 && (
         <div className="space-y-2 pt-2">
           <button
@@ -537,55 +646,176 @@ function DetectedRecurring({
 
 // --- Monthly Bills Checklist Section ---
 
-function BillsChecklist() {
-  const { bills, billPayments, transactions } = useAppState();
-  const dispatch = useAppDispatch();
-  const [showForm, setShowForm] = useState(false);
-  const [name, setName] = useState("");
-  const [amount, setAmount] = useState("");
-  const [frequency, setFrequency] = useState<RecurringBill["frequency"]>("monthly");
-  const [dueDay, setDueDay] = useState("");
-  const [category, setCategory] = useState("Bills & Subscriptions");
-  const [historyBillId, setHistoryBillId] = useState<string | null>(null);
+const CUSTOM_MONTHS_OPTIONS = [
+  { value: 2, label: "Every 2 months" },
+  { value: 4, label: "Every 4 months" },
+  { value: 6, label: "Every 6 months" },
+  { value: 12, label: "Yearly (12 months)" },
+];
+
+function BillForm({
+  initial,
+  onSave,
+  onCancel,
+}: {
+  initial?: RecurringBill;
+  onSave: (data: Omit<RecurringBill, "id">) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(initial?.name ?? "");
+  const [amount, setAmount] = useState(initial?.amount != null ? String(initial.amount) : "");
+  const [frequency, setFrequency] = useState<RecurringBill["frequency"]>(initial?.frequency ?? "monthly");
+  const [customMonths, setCustomMonths] = useState(initial?.customMonths ?? 2);
+  const [dueDay, setDueDay] = useState(initial?.dueDay != null ? String(initial.dueDay) : "");
+  const [category, setCategory] = useState(initial?.category ?? "Bills & Subscriptions");
 
   const inputClass =
     "w-full border border-[#E8E2DA] rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[#7C8C6E] bg-white text-[#2D2D2D]";
 
-  const addBill = () => {
+  const handleSave = () => {
     if (!name || !amount || !dueDay) return;
-    dispatch({
-      type: "ADD_BILL",
-      payload: {
-        id: uuidv4(),
-        name,
-        amount: parseFloat(amount),
-        frequency,
-        dueDay: parseInt(dueDay),
-        category,
-      },
+    onSave({
+      name,
+      amount: parseFloat(amount),
+      frequency,
+      customMonths: frequency === "custom" ? customMonths : undefined,
+      dueDay: parseInt(dueDay),
+      category,
     });
-    setName("");
-    setAmount("");
-    setDueDay("");
-    setShowForm(false);
   };
 
-  const markPaid = (bill: RecurringBill) => {
-    const nextDue = getNextDueDate(bill);
-    const now = new Date();
-    const days = daysUntil(nextDue);
-    dispatch({
-      type: "ADD_BILL_PAYMENT",
-      payload: {
-        id: uuidv4(),
-        billId: bill.id,
-        paidDate: now.toISOString().slice(0, 10),
-        dueDate: nextDue.toISOString().slice(0, 10),
-        amount: bill.amount,
-        onTime: days >= 0,
-      },
-    });
-  };
+  return (
+    <div className="bg-white rounded-2xl border border-[#E8E2DA] p-4 space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="col-span-2">
+          <label className="block text-[10px] text-[#8B8578] mb-1 font-medium uppercase tracking-wider">
+            Bill Name
+          </label>
+          <input
+            placeholder="e.g. T-Mobile"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className={inputClass}
+          />
+        </div>
+        <div>
+          <label className="block text-[10px] text-[#8B8578] mb-1 font-medium uppercase tracking-wider">
+            Amount ($)
+          </label>
+          <input
+            type="number"
+            placeholder="50.00"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            className={inputClass}
+          />
+        </div>
+        <div>
+          <label className="block text-[10px] text-[#8B8578] mb-1 font-medium uppercase tracking-wider">
+            Frequency
+          </label>
+          <select
+            value={frequency}
+            onChange={(e) => setFrequency(e.target.value as RecurringBill["frequency"])}
+            className={inputClass}
+          >
+            <option value="weekly">Weekly</option>
+            <option value="biweekly">Biweekly</option>
+            <option value="monthly">Monthly</option>
+            <option value="custom">Custom</option>
+          </select>
+        </div>
+        {frequency === "custom" && (
+          <div className="col-span-2">
+            <label className="block text-[10px] text-[#8B8578] mb-1 font-medium uppercase tracking-wider">
+              Every
+            </label>
+            <select
+              value={customMonths}
+              onChange={(e) => setCustomMonths(parseInt(e.target.value))}
+              className={inputClass}
+            >
+              {CUSTOM_MONTHS_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        <div className={frequency === "custom" ? "col-span-2" : ""}>
+          <label className="block text-[10px] text-[#8B8578] mb-1 font-medium uppercase tracking-wider">
+            {frequency === "weekly" ? "Day of Week" : "Due Day"}
+          </label>
+          {frequency === "weekly" ? (
+            <div className="flex gap-1">
+              {DAYS_OF_WEEK.map((day, i) => (
+                <button
+                  key={day}
+                  type="button"
+                  onClick={() => setDueDay(String(i))}
+                  className={`flex-1 py-2.5 rounded-xl text-xs font-medium transition-colors ${
+                    dueDay === String(i)
+                      ? "bg-[#7C8C6E] text-white"
+                      : "border border-[#E8E2DA] bg-white text-[#8B8578] hover:border-[#7C8C6E]"
+                  }`}
+                >
+                  {day}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <input
+              type="number"
+              placeholder="15"
+              value={dueDay}
+              onChange={(e) => setDueDay(e.target.value)}
+              min={1}
+              max={31}
+              className={inputClass}
+            />
+          )}
+        </div>
+        <div className={frequency === "weekly" ? "col-span-2" : ""}>
+          <label className="block text-[10px] text-[#8B8578] mb-1 font-medium uppercase tracking-wider">
+            Category
+          </label>
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            className={inputClass}
+          >
+            {CATEGORIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div className="flex gap-2 pt-1">
+        <button
+          onClick={handleSave}
+          className="bg-[#7C8C6E] text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-[#6B7A5E]"
+        >
+          {initial ? "Save" : "Add"}
+        </button>
+        <button
+          onClick={onCancel}
+          className="bg-[#F5F0EB] text-[#5C5549] px-4 py-2 rounded-xl text-sm font-medium hover:bg-[#EDE7DF]"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function BillsChecklist() {
+  const { bills, billPayments, transactions } = useAppState();
+  const dispatch = useAppDispatch();
+  const [showForm, setShowForm] = useState(false);
+  const [historyBillId, setHistoryBillId] = useState<string | null>(null);
+  const [editingBillId, setEditingBillId] = useState<string | null>(null);
+  const [swipedBillId, setSwipedBillId] = useState<string | null>(null);
 
   const getBillPayments = (billId: string) =>
     billPayments
@@ -601,6 +831,45 @@ function BillsChecklist() {
     return lastPaid >= lastDue;
   };
 
+  const addBill = (data: Omit<RecurringBill, "id">) => {
+    dispatch({
+      type: "ADD_BILL",
+      payload: { id: uuidv4(), ...data },
+    });
+    setShowForm(false);
+  };
+
+  const updateBill = (id: string, data: Omit<RecurringBill, "id">) => {
+    dispatch({
+      type: "UPDATE_BILL",
+      payload: { id, ...data },
+    });
+    setEditingBillId(null);
+  };
+
+  const markPaid = (bill: RecurringBill) => {
+    const lastDue = getLastDueDate(bill);
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    lastDue.setHours(0, 0, 0, 0);
+
+    const daysSinceLastDue = Math.ceil((now.getTime() - lastDue.getTime()) / 86400000);
+    const isOverduePay = daysSinceLastDue > 0 && !isAlreadyPaidThisCycle(bill);
+    const dueTarget = isOverduePay ? lastDue : getNextDueDate(bill);
+
+    dispatch({
+      type: "ADD_BILL_PAYMENT",
+      payload: {
+        id: uuidv4(),
+        billId: bill.id,
+        paidDate: now.toISOString().slice(0, 10),
+        dueDate: dueTarget.toISOString().slice(0, 10),
+        amount: bill.amount,
+        onTime: !isOverduePay,
+      },
+    });
+  };
+
   const totalIncome = useMemo(() => {
     const now = new Date();
     const monthTx = transactions.filter((t) => {
@@ -610,13 +879,12 @@ function BillsChecklist() {
     return monthTx.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0);
   }, [transactions]);
 
-  // Sum of bill payments recorded this calendar month
   const paidBillsThisMonth = useMemo(() => {
     const now = new Date();
     return billPayments
       .filter((p) => {
         const d = new Date(p.paidDate);
-        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear() && p.onTime;
       })
       .reduce((sum, p) => sum + p.amount, 0);
   }, [billPayments]);
@@ -624,6 +892,7 @@ function BillsChecklist() {
   const totalMonthlyBills = useMemo(() => {
     return bills.reduce((sum, b) => {
       if (b.frequency === "monthly") return sum + b.amount;
+      if (b.frequency === "custom") return sum + b.amount / (b.customMonths ?? 1);
       if (b.frequency === "biweekly") return sum + b.amount * 2.17;
       return sum + b.amount * 4.33;
     }, 0);
@@ -633,22 +902,52 @@ function BillsChecklist() {
     return bills.reduce((sum, b) => {
       if (b.frequency === "weekly") return sum + b.amount;
       if (b.frequency === "biweekly") return sum + b.amount / 2;
+      if (b.frequency === "custom") return sum + b.amount / ((b.customMonths ?? 1) * 4.33);
       return sum + b.amount / 4.33;
     }, 0);
   }, [bills]);
 
   const sortedBills = useMemo(() => {
     return [...bills].sort((a, b) => {
-      const aDays = daysUntil(getNextDueDate(a));
-      const bDays = daysUntil(getNextDueDate(b));
-      return aDays - bDays;
+      const aPaid = isAlreadyPaidThisCycle(a);
+      const bPaid = isAlreadyPaidThisCycle(b);
+      const aLastDue = getLastDueDate(a);
+      const bLastDue = getLastDueDate(b);
+      const now = new Date();
+      now.setHours(0, 0, 0, 0);
+      const aOverdue = !aPaid && aLastDue <= now;
+      const bOverdue = !bPaid && bLastDue <= now;
+      // Overdue first, then by next due date
+      if (aOverdue && !bOverdue) return -1;
+      if (!aOverdue && bOverdue) return 1;
+      return daysUntil(getNextDueDate(a)) - daysUntil(getNextDueDate(b));
     });
-  }, [bills]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bills, billPayments]);
+
+  const overdueCount = useMemo(() => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    return bills.filter((b) => {
+      const lastDue = getLastDueDate(b);
+      lastDue.setHours(0, 0, 0, 0);
+      return !isAlreadyPaidThisCycle(b) && lastDue <= now;
+    }).length;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bills, billPayments]);
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-[#2D2D2D]">Monthly Bills</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold text-[#2D2D2D]">Monthly Bills</h3>
+          {overdueCount > 0 && (
+            <span className="flex items-center gap-1 text-[10px] font-semibold text-[#C4756E] bg-[#C4756E]/10 px-2 py-0.5 rounded-full">
+              <AlertTriangle size={10} />
+              {overdueCount} overdue
+            </span>
+          )}
+        </div>
         <button
           onClick={() => setShowForm(!showForm)}
           className="flex items-center gap-1 bg-[#7C8C6E] text-white px-3 py-1.5 rounded-xl text-xs font-medium hover:bg-[#6B7A5E] transition-colors"
@@ -659,115 +958,12 @@ function BillsChecklist() {
       </div>
 
       {showForm && (
-        <div className="bg-white rounded-2xl border border-[#E8E2DA] p-4 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2">
-              <label className="block text-[10px] text-[#8B8578] mb-1 font-medium uppercase tracking-wider">
-                Bill Name
-              </label>
-              <input
-                placeholder="e.g. T-Mobile"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className={inputClass}
-              />
-            </div>
-            <div>
-              <label className="block text-[10px] text-[#8B8578] mb-1 font-medium uppercase tracking-wider">
-                Amount ($)
-              </label>
-              <input
-                type="number"
-                placeholder="50.00"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                className={inputClass}
-              />
-            </div>
-            <div>
-              <label className="block text-[10px] text-[#8B8578] mb-1 font-medium uppercase tracking-wider">
-                Frequency
-              </label>
-              <select
-                value={frequency}
-                onChange={(e) =>
-                  setFrequency(e.target.value as RecurringBill["frequency"])
-                }
-                className={inputClass}
-              >
-                <option value="weekly">Weekly</option>
-                <option value="biweekly">Biweekly</option>
-                <option value="monthly">Monthly</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-[10px] text-[#8B8578] mb-1 font-medium uppercase tracking-wider">
-                {frequency === "weekly" ? "Day of Week" : "Due Day"}
-              </label>
-              {frequency === "weekly" ? (
-                <div className="flex gap-1">
-                  {DAYS_OF_WEEK.map((day, i) => (
-                    <button
-                      key={day}
-                      type="button"
-                      onClick={() => setDueDay(String(i))}
-                      className={`flex-1 py-2.5 rounded-xl text-xs font-medium transition-colors ${
-                        dueDay === String(i)
-                          ? "bg-[#7C8C6E] text-white"
-                          : "border border-[#E8E2DA] bg-white text-[#8B8578] hover:border-[#7C8C6E]"
-                      }`}
-                    >
-                      {day}
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <input
-                  type="number"
-                  placeholder="15"
-                  value={dueDay}
-                  onChange={(e) => setDueDay(e.target.value)}
-                  min={1}
-                  max={31}
-                  className={inputClass}
-                />
-              )}
-            </div>
-            <div>
-              <label className="block text-[10px] text-[#8B8578] mb-1 font-medium uppercase tracking-wider">
-                Category
-              </label>
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                className={inputClass}
-              >
-                {CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div className="flex gap-2 pt-1">
-            <button
-              onClick={addBill}
-              className="bg-[#7C8C6E] text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-[#6B7A5E]"
-            >
-              Add
-            </button>
-            <button
-              onClick={() => setShowForm(false)}
-              className="bg-[#F5F0EB] text-[#5C5549] px-4 py-2 rounded-xl text-sm font-medium hover:bg-[#EDE7DF]"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
+        <BillForm
+          onSave={addBill}
+          onCancel={() => setShowForm(false)}
+        />
       )}
 
-      {/* Summary */}
       {bills.length > 0 && (
         <div className="grid grid-cols-3 gap-2">
           <div className="bg-white rounded-2xl border border-[#E8E2DA] p-3 text-center">
@@ -803,7 +999,6 @@ function BillsChecklist() {
         </div>
       )}
 
-      {/* Bill List */}
       {sortedBills.length === 0 ? (
         <div className="text-center py-10">
           <Clock size={28} className="text-[#B5AFA6] mx-auto mb-2" />
@@ -816,185 +1011,214 @@ function BillsChecklist() {
         <div className="space-y-2">
           {sortedBills.map((bill) => {
             const nextDue = getNextDueDate(bill);
-            const days = daysUntil(nextDue);
+            const lastDue = getLastDueDate(bill);
             const paid = isAlreadyPaidThisCycle(bill);
             const payments = getBillPayments(bill.id);
             const onTimeCount = payments.filter((p) => p.onTime).length;
-            const urgencyColor =
-              paid
-                ? "#6B9B7A"
-                : days <= 0
-                  ? "#C4756E"
-                  : days <= 3
-                    ? "#D4A76A"
-                    : "#8B8578";
+
+            const now = new Date();
+            now.setHours(0, 0, 0, 0);
+            lastDue.setHours(0, 0, 0, 0);
+            const daysSinceLastDue = Math.ceil((now.getTime() - lastDue.getTime()) / 86400000);
+            const isOverdue = !paid && daysSinceLastDue > 0;
+            const daysLeft = daysUntil(nextDue);
+
+            const urgencyColor = paid
+              ? "#6B9B7A"
+              : isOverdue
+                ? "#C4756E"
+                : daysLeft <= 3
+                  ? "#D4A76A"
+                  : "#8B8578";
+
+            const statusText = paid
+              ? "Paid"
+              : isOverdue
+                ? `${daysSinceLastDue}d overdue`
+                : daysLeft === 0
+                  ? "Due today"
+                  : `${daysLeft}d left`;
+
+            if (editingBillId === bill.id) {
+              return (
+                <div key={bill.id}>
+                  <BillForm
+                    initial={bill}
+                    onSave={(data) => updateBill(bill.id, data)}
+                    onCancel={() => setEditingBillId(null)}
+                  />
+                </div>
+              );
+            }
 
             return (
-              <div
-                key={bill.id}
-                className="bg-white rounded-2xl border border-[#E8E2DA] p-3.5 space-y-2"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div
-                      className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-                      style={{
-                        backgroundColor:
-                          (CATEGORY_COLORS[bill.category] ?? "#B5AFA6") + "18",
-                      }}
-                    >
-                      {paid ? (
-                        <CheckCircle2
-                          size={18}
-                          style={{ color: "#6B9B7A" }}
-                        />
-                      ) : (
-                        <Clock size={18} style={{ color: urgencyColor }} />
-                      )}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-[#2D2D2D] truncate">
-                        {bill.name}
-                      </p>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-[10px] text-[#B5AFA6]">
-                          {bill.frequency} &middot;{" "}
-                          {bill.frequency === "weekly"
-                            ? ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][
-                                bill.dueDay % 7
-                              ]
-                            : `Day ${bill.dueDay}`}
-                        </span>
-                        <span
-                          className="text-[10px] font-medium px-1.5 py-0.5 rounded-full"
+              <div key={bill.id}>
+                <SwipeableRow
+                  isOpen={swipedBillId === bill.id}
+                  onOpen={() => setSwipedBillId(bill.id)}
+                  onClose={() => setSwipedBillId(null)}
+                  onEdit={() => {
+                    setHistoryBillId(null);
+                    setEditingBillId(bill.id);
+                  }}
+                  onDelete={() => dispatch({ type: "DELETE_BILL", payload: bill.id })}
+                >
+                  <div className="p-3.5 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div
+                          className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
                           style={{
-                            backgroundColor: urgencyColor + "15",
-                            color: urgencyColor,
+                            backgroundColor:
+                              (CATEGORY_COLORS[bill.category] ?? "#B5AFA6") + "18",
                           }}
                         >
-                          {paid
-                            ? "Paid"
-                            : days === 0
-                              ? "Due today"
-                              : days < 0
-                                ? `${Math.abs(days)}d overdue`
-                                : `${days}d left`}
+                          {paid ? (
+                            <CheckCircle2 size={18} style={{ color: "#6B9B7A" }} />
+                          ) : isOverdue ? (
+                            <AlertTriangle size={18} style={{ color: "#C4756E" }} />
+                          ) : (
+                            <Clock size={18} style={{ color: urgencyColor }} />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-[#2D2D2D] truncate">
+                            {bill.name}
+                          </p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className="text-[10px] text-[#B5AFA6]">
+                              {frequencyLabel(bill)} &middot;{" "}
+                              {bill.frequency === "weekly"
+                                ? ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][
+                                    bill.dueDay % 7
+                                  ]
+                                : `Day ${bill.dueDay}`}
+                            </span>
+                            <span
+                              className="text-[10px] font-medium px-1.5 py-0.5 rounded-full"
+                              style={{
+                                backgroundColor: urgencyColor + "15",
+                                color: urgencyColor,
+                              }}
+                            >
+                              {statusText}
+                            </span>
+                            {paid && (
+                              <span className="text-[10px] text-[#B5AFA6]">
+                                Next: {formatDate(nextDue)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0 ml-2">
+                        <span className="text-sm font-semibold text-[#C4756E]">
+                          ${bill.amount.toFixed(2)}
                         </span>
-                        {paid && (
-                          <span className="text-[10px] text-[#B5AFA6]">
-                            Next: {formatDate(nextDue)}
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2">
+                      {!paid && (
+                        <button
+                          onClick={() => markPaid(bill)}
+                          className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium transition-colors ${
+                            isOverdue
+                              ? "bg-[#C4756E]/10 text-[#C4756E] hover:bg-[#C4756E]/20"
+                              : "bg-[#6B9B7A]/10 text-[#6B9B7A] hover:bg-[#6B9B7A]/20"
+                          }`}
+                        >
+                          <CheckCircle2 size={14} />
+                          {isOverdue ? "Mark Paid (Late)" : "Mark Paid"}
+                        </button>
+                      )}
+                      <button
+                        onClick={() =>
+                          setHistoryBillId(
+                            historyBillId === bill.id ? null : bill.id
+                          )
+                        }
+                        className="flex items-center justify-center gap-1.5 bg-[#F5F0EB] text-[#5C5549] py-2 px-3 rounded-xl text-xs font-medium hover:bg-[#EDE7DF] transition-colors"
+                      >
+                        <History size={14} />
+                        {payments.length > 0 && (
+                          <span className="text-[#6B9B7A]">
+                            {onTimeCount}/{payments.length}
                           </span>
                         )}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0 ml-2">
-                    <span className="text-sm font-semibold text-[#C4756E]">
-                      ${bill.amount.toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex gap-2">
-                  {!paid && (
-                    <button
-                      onClick={() => markPaid(bill)}
-                      className="flex-1 flex items-center justify-center gap-1.5 bg-[#6B9B7A]/10 text-[#6B9B7A] py-2 rounded-xl text-xs font-medium hover:bg-[#6B9B7A]/20 transition-colors"
-                    >
-                      <CheckCircle2 size={14} />
-                      Mark Paid
-                    </button>
-                  )}
-                  <button
-                    onClick={() =>
-                      setHistoryBillId(
-                        historyBillId === bill.id ? null : bill.id
-                      )
-                    }
-                    className="flex items-center justify-center gap-1.5 bg-[#F5F0EB] text-[#5C5549] py-2 px-3 rounded-xl text-xs font-medium hover:bg-[#EDE7DF] transition-colors"
-                  >
-                    <History size={14} />
-                    {payments.length > 0 && (
-                      <span className="text-[#6B9B7A]">
-                        {onTimeCount}/{payments.length}
-                      </span>
-                    )}
-                  </button>
-                  <button
-                    onClick={() =>
-                      dispatch({ type: "DELETE_BILL", payload: bill.id })
-                    }
-                    className="p-2 text-[#B5AFA6] hover:text-[#C4756E] hover:bg-[#C4756E]/10 rounded-xl transition-colors"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-
-                {historyBillId === bill.id && (
-                  <div className="border-t border-[#E8E2DA] pt-2 mt-1">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-[10px] text-[#8B8578] font-medium uppercase tracking-wider">
-                        Payment History
-                      </p>
-                      <button
-                        onClick={() => setHistoryBillId(null)}
-                        className="p-0.5 text-[#B5AFA6]"
-                      >
-                        <X size={12} />
                       </button>
                     </div>
-                    {payments.length === 0 ? (
-                      <p className="text-xs text-[#B5AFA6]">No payments recorded yet.</p>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {payments.slice(0, 8).map((p) => (
-                          <div
-                            key={p.id}
-                            className="flex items-center justify-between text-xs"
+
+                    {historyBillId === bill.id && (
+                      <div className="border-t border-[#E8E2DA] pt-2 mt-1">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-[10px] text-[#8B8578] font-medium uppercase tracking-wider">
+                            Payment History
+                          </p>
+                          <button
+                            onClick={() => setHistoryBillId(null)}
+                            className="p-0.5 text-[#B5AFA6]"
                           >
-                            <div className="flex items-center gap-1.5">
-                              {p.onTime ? (
-                                <CheckCircle2
-                                  size={12}
-                                  className="text-[#6B9B7A]"
-                                />
-                              ) : (
-                                <AlertTriangle
-                                  size={12}
-                                  className="text-[#C4756E]"
-                                />
-                              )}
-                              <span className="text-[#8B8578]">
-                                {p.paidDate}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-[#2D2D2D] font-medium">
-                                ${p.amount.toFixed(2)}
-                              </span>
-                              <button
-                                onClick={() =>
-                                  dispatch({
-                                    type: "DELETE_BILL_PAYMENT",
-                                    payload: p.id,
-                                  })
-                                }
-                                className="p-0.5 text-[#B5AFA6] hover:text-[#C4756E] transition-colors"
-                                title="Delete payment"
+                            <X size={12} />
+                          </button>
+                        </div>
+                        {payments.length === 0 ? (
+                          <p className="text-xs text-[#B5AFA6]">No payments recorded yet.</p>
+                        ) : (
+                          <div className="space-y-1.5">
+                            {payments.slice(0, 8).map((p) => (
+                              <div
+                                key={p.id}
+                                className="flex items-center justify-between text-xs"
                               >
-                                <Trash2 size={11} />
-                              </button>
-                            </div>
+                                <div className="flex items-center gap-1.5">
+                                  {p.onTime ? (
+                                    <CheckCircle2 size={12} className="text-[#6B9B7A]" />
+                                  ) : (
+                                    <AlertTriangle size={12} className="text-[#C4756E]" />
+                                  )}
+                                  <span className="text-[#8B8578]">
+                                    {p.paidDate}
+                                    {!p.onTime && (
+                                      <span className="ml-1 text-[#C4756E]">(late)</span>
+                                    )}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[#2D2D2D] font-medium">
+                                    ${p.amount.toFixed(2)}
+                                  </span>
+                                  <button
+                                    onClick={() =>
+                                      dispatch({
+                                        type: "DELETE_BILL_PAYMENT",
+                                        payload: p.id,
+                                      })
+                                    }
+                                    className="p-0.5 text-[#B5AFA6] hover:text-[#C4756E] transition-colors"
+                                  >
+                                    <Trash2 size={11} />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
                           </div>
-                        ))}
+                        )}
                       </div>
                     )}
                   </div>
-                )}
+                </SwipeableRow>
               </div>
             );
           })}
         </div>
+      )}
+
+      {/* Hint for swipe gesture */}
+      {sortedBills.length > 0 && (
+        <p className="text-center text-[10px] text-[#B5AFA6]">
+          Swipe left on a bill to edit or delete
+        </p>
       )}
     </div>
   );
@@ -1038,7 +1262,6 @@ function SpendingInsights({
     .reduce((s, t) => s + Math.abs(t.amount), 0);
   const savingsRate = income > 0 ? ((income - expenses) / income) * 100 : 0;
 
-  // 50/30/20 analysis
   const needs = thisMonth
     .filter(
       (t) =>
@@ -1061,7 +1284,6 @@ function SpendingInsights({
   const wantsPct = income > 0 ? (wants / income) * 100 : 0;
   const savingsPct = income > 0 ? (savings / income) * 100 : 0;
 
-  // Category trends
   const categoryThisMonth = new Map<string, number>();
   const categoryLastMonth = new Map<string, number>();
   for (const t of thisMonth.filter((t) => t.amount < 0)) {
@@ -1086,13 +1308,11 @@ function SpendingInsights({
     .filter((t) => Math.abs(t.change) > 10 && t.prev > 0)
     .sort((a, b) => b.change - a.change);
 
-  // Fee detection
   const fees = transactions.filter(
     (t) => t.category === "Fees" && t.amount < 0
   );
   const totalFees = fees.reduce((s, t) => s + Math.abs(t.amount), 0);
 
-  // Tips
   const tips: string[] = [];
   if (needsPct > 50)
     tips.push(
@@ -1125,7 +1345,6 @@ function SpendingInsights({
 
   return (
     <div className="space-y-3">
-      {/* 50/30/20 Score */}
       <div className="bg-white rounded-2xl border border-[#E8E2DA] p-4 space-y-3">
         <h3 className="text-sm font-semibold text-[#2D2D2D]">
           50/30/20 Budget Score
@@ -1137,47 +1356,24 @@ function SpendingInsights({
         ) : (
           <div className="space-y-2.5">
             {[
-              {
-                label: "Needs",
-                pct: needsPct,
-                target: 50,
-                color: "#7C8C6E",
-              },
-              {
-                label: "Wants",
-                pct: wantsPct,
-                target: 30,
-                color: "#9B7EB5",
-              },
-              {
-                label: "Savings",
-                pct: savingsPct,
-                target: 20,
-                color: "#6B9B7A",
-              },
+              { label: "Needs", pct: needsPct, target: 50, color: "#7C8C6E" },
+              { label: "Wants", pct: wantsPct, target: 30, color: "#9B7EB5" },
+              { label: "Savings", pct: savingsPct, target: 20, color: "#6B9B7A" },
             ].map((item) => (
               <div key={item.label}>
                 <div className="flex justify-between text-xs mb-1">
-                  <span className="text-[#8B8578] font-medium">
-                    {item.label}
-                  </span>
+                  <span className="text-[#8B8578] font-medium">{item.label}</span>
                   <span
                     className="font-semibold"
                     style={{
                       color:
                         item.label === "Savings"
-                          ? item.pct >= item.target
-                            ? "#6B9B7A"
-                            : "#C4756E"
-                          : item.pct <= item.target
-                            ? "#6B9B7A"
-                            : "#C4756E",
+                          ? item.pct >= item.target ? "#6B9B7A" : "#C4756E"
+                          : item.pct <= item.target ? "#6B9B7A" : "#C4756E",
                     }}
                   >
                     {item.pct.toFixed(0)}%{" "}
-                    <span className="text-[#B5AFA6] font-normal">
-                      / {item.target}%
-                    </span>
+                    <span className="text-[#B5AFA6] font-normal">/ {item.target}%</span>
                   </span>
                 </div>
                 <div className="w-full bg-[#F5F0EB] rounded-full h-2">
@@ -1195,7 +1391,6 @@ function SpendingInsights({
         )}
       </div>
 
-      {/* Savings Rate */}
       <div className="bg-white rounded-2xl border border-[#E8E2DA] p-4">
         <div className="flex items-center justify-between">
           <div>
@@ -1223,21 +1418,15 @@ function SpendingInsights({
         </div>
       </div>
 
-      {/* Spending Trends */}
       {trends.length > 0 && (
         <div className="bg-white rounded-2xl border border-[#E8E2DA] p-4 space-y-2.5">
-          <h3 className="text-sm font-semibold text-[#2D2D2D]">
-            Spending Trends
-          </h3>
+          <h3 className="text-sm font-semibold text-[#2D2D2D]">Spending Trends</h3>
           {trends.slice(0, 5).map((t) => (
             <div key={t.category} className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div
                   className="w-2 h-2 rounded-full"
-                  style={{
-                    backgroundColor:
-                      CATEGORY_COLORS[t.category] ?? "#B5AFA6",
-                  }}
+                  style={{ backgroundColor: CATEGORY_COLORS[t.category] ?? "#B5AFA6" }}
                 />
                 <span className="text-xs text-[#2D2D2D]">{t.category}</span>
               </div>
@@ -1254,28 +1443,21 @@ function SpendingInsights({
         </div>
       )}
 
-      {/* Tips & Advice */}
       {tips.length > 0 && (
         <div className="space-y-2">
-          <h3 className="text-sm font-semibold text-[#2D2D2D] px-1">
-            Financial Tips
-          </h3>
+          <h3 className="text-sm font-semibold text-[#2D2D2D] px-1">Financial Tips</h3>
           {tips.map((tip, i) => (
             <div
               key={i}
               className="bg-white rounded-2xl border border-[#E8E2DA] p-3.5 flex items-start gap-2.5"
             >
-              <Lightbulb
-                size={15}
-                className="text-[#D4A76A] mt-0.5 shrink-0"
-              />
+              <Lightbulb size={15} className="text-[#D4A76A] mt-0.5 shrink-0" />
               <p className="text-xs text-[#5C5549] leading-relaxed">{tip}</p>
             </div>
           ))}
         </div>
       )}
 
-      {/* What If Simulator */}
       <WhatIfSimulator
         income={income}
         expenses={expenses}

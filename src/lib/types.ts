@@ -68,7 +68,8 @@ export interface RecurringBill {
   id: string;
   name: string;
   amount: number;
-  frequency: "weekly" | "biweekly" | "monthly";
+  frequency: "weekly" | "biweekly" | "monthly" | "custom";
+  customMonths?: number;
   dueDay: number;
   category: string;
   accountId?: string;
