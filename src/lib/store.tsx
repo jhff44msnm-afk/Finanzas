@@ -31,6 +31,18 @@ interface AppState {
   bills: RecurringBill[];
   billPayments: BillPayment[];
   learnedCategories: Record<string, string>;
+  /** Imported rows held back because an identical charge already exists. */
+  quarantinedDuplicates: Transaction[];
+}
+
+/**
+ * Identity used to spot double charges: same account, date, description and
+ * amount. Description whitespace is normalized so line-wrapped descriptions
+ * from different parsers still match.
+ */
+export function duplicateKey(t: Transaction): string {
+  const desc = t.description.trim().toUpperCase().replace(/\s+/g, " ");
+  return `${t.accountId ?? ""}|${t.date}|${desc}|${t.amount.toFixed(2)}`;
 }
 
 type Action =
@@ -60,6 +72,18 @@ type Action =
   | { type: "DELETE_BILL"; payload: string }
   | { type: "ADD_BILL_PAYMENT"; payload: BillPayment }
   | { type: "DELETE_BILL_PAYMENT"; payload: string }
+  | { type: "APPROVE_DUPLICATE"; payload: string }
+  | { type: "DISCARD_DUPLICATE"; payload: string }
+  | { type: "CLEAR_DUPLICATES" }
+  | {
+      type: "SET_ACCOUNT_BALANCE";
+      payload: {
+        accountId: string;
+        availableBalance?: number;
+        postedBalance?: number;
+        balanceAsOf?: string;
+      };
+    }
   | { type: "LOAD_STATE"; payload: AppState };
 
 function reducer(state: AppState, action: Action): AppState {
@@ -86,6 +110,9 @@ function reducer(state: AppState, action: Action): AppState {
           (s) => s.accountId !== action.payload
         ),
         bills: state.bills.filter((b) => b.accountId !== action.payload),
+        quarantinedDuplicates: state.quarantinedDuplicates.filter(
+          (t) => t.accountId !== action.payload
+        ),
         activeAccountId:
           state.activeAccountId === action.payload
             ? state.accounts.find((a) => a.id !== action.payload)?.id ?? "all"
@@ -100,7 +127,75 @@ function reducer(state: AppState, action: Action): AppState {
         const cat = applyLearnedCategories(t.description, learned);
         return cat !== "Other" ? { ...t, category: cat } : t;
       });
-      return { ...state, transactions: [...state.transactions, ...incoming] };
+
+      // Hold back charges identical to one already in the ledger (or already
+      // quarantined, or repeated inside this very batch) so the user decides.
+      const seen = new Set(state.transactions.map(duplicateKey));
+      for (const q of state.quarantinedDuplicates) seen.add(duplicateKey(q));
+
+      const accepted: Transaction[] = [];
+      const held: Transaction[] = [];
+      for (const t of incoming) {
+        const key = duplicateKey(t);
+        if (seen.has(key)) {
+          held.push(t);
+        } else {
+          seen.add(key);
+          accepted.push(t);
+        }
+      }
+
+      return {
+        ...state,
+        transactions: [...state.transactions, ...accepted],
+        quarantinedDuplicates: [...state.quarantinedDuplicates, ...held],
+      };
+    }
+    case "APPROVE_DUPLICATE": {
+      const tx = state.quarantinedDuplicates.find((t) => t.id === action.payload);
+      if (!tx) return state;
+      return {
+        ...state,
+        transactions: [...state.transactions, tx],
+        quarantinedDuplicates: state.quarantinedDuplicates.filter(
+          (t) => t.id !== action.payload
+        ),
+      };
+    }
+    case "DISCARD_DUPLICATE":
+      return {
+        ...state,
+        quarantinedDuplicates: state.quarantinedDuplicates.filter(
+          (t) => t.id !== action.payload
+        ),
+      };
+    case "CLEAR_DUPLICATES":
+      return { ...state, quarantinedDuplicates: [] };
+    case "SET_ACCOUNT_BALANCE": {
+      const { accountId, availableBalance, postedBalance, balanceAsOf } =
+        action.payload;
+      const target = state.accounts.find((a) => a.id === accountId);
+      // Importing an older statement must not overwrite a fresher balance.
+      if (
+        target?.balanceAsOf &&
+        balanceAsOf &&
+        balanceAsOf < target.balanceAsOf
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        accounts: state.accounts.map((a) =>
+          a.id === accountId
+            ? {
+                ...a,
+                ...(availableBalance !== undefined ? { availableBalance } : {}),
+                ...(postedBalance !== undefined ? { postedBalance } : {}),
+                ...(balanceAsOf !== undefined ? { balanceAsOf } : {}),
+              }
+            : a
+        ),
+      };
     }
     case "ADD_TRANSACTION":
       return {
@@ -149,6 +244,9 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         statements: state.statements.filter((s) => s.id !== action.payload),
         transactions: state.transactions.filter(
+          (t) => t.statementId !== action.payload
+        ),
+        quarantinedDuplicates: state.quarantinedDuplicates.filter(
           (t) => t.statementId !== action.payload
         ),
       };
@@ -235,6 +333,7 @@ const emptyState: AppState = {
   bills: [],
   billPayments: [],
   learnedCategories: {},
+  quarantinedDuplicates: [],
 };
 
 function loadState(): AppState {

@@ -1266,7 +1266,7 @@ function SpendingInsights({
     .filter(
       (t) =>
         t.amount < 0 &&
-        ["Food & Dining", "Transportation", "Insurance", "Bills & Subscriptions"].includes(
+        ["Food & Dining", "Transportation", "Insurance", "Bills & Subscriptions", "Education"].includes(
           t.category
         )
     )

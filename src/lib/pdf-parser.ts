@@ -372,7 +372,13 @@ const GECU_PDF_SKIP_RE = [
 export async function parseGecuPdfExport(
   file: File,
   statementId: string
-): Promise<{ transactions: Transaction[]; periodStart: string; periodEnd: string }> {
+): Promise<{
+  transactions: Transaction[];
+  periodStart: string;
+  periodEnd: string;
+  availableBalance?: number;
+  postedBalance?: number;
+}> {
   // @ts-expect-error -- load worker on main thread to avoid iOS Safari Worker issues
   globalThis.pdfjsWorker = await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
   const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
@@ -411,12 +417,51 @@ export async function parseGecuPdfExport(
 
   const datePat = /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s+\d{4}$/;
 
+  // ---- Summary balances (page 1, above the DATE column header) ----
+  // "Available Balance" sits at x≈92 with its value ~32pt below it; the posted
+  // "Balance" label sits at x≈329 with its value directly below. The word
+  // "Balance" also appears as a column header, so only look above that row.
+  const page1 = allPageItems.filter((i) => i.pageNum === 1);
+  const headerY = page1.find((i) => i.text.trim() === "DATE")?.y ?? 0;
+  const summaryBalance = (label: string): number | undefined => {
+    const lab = page1.find((i) => i.text.trim() === label && i.y > headerY);
+    if (!lab) return undefined;
+    const value = page1
+      .filter(
+        (i) =>
+          i.y < lab.y &&
+          lab.y - i.y <= 60 &&
+          Math.abs(i.x - lab.x) <= 25 &&
+          parseHistDollar(i.text) !== null
+      )
+      .sort((a, b) => b.y - a.y)[0];
+    return value ? parseHistDollar(value.text) ?? undefined : undefined;
+  };
+  const availableBalance = summaryBalance("Available Balance");
+  const postedBalance = summaryBalance("Balance");
+
   const transactions: Transaction[] = [];
   let seq = 0;
+  // The "Pending" / "Posted" headers only appear where the section changes, so
+  // the section carries over onto continuation pages.
+  let carriedSection: "pending" | "posted" = "posted";
 
   // Process page by page to keep y-coordinates within page scope
   for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-    const pageItems = allPageItems.filter((i) => i.pageNum === pageNum && !skipItem(i.text));
+    const rawPageItems = allPageItems.filter((i) => i.pageNum === pageNum);
+    const pageItems = rawPageItems.filter((i) => !skipItem(i.text));
+
+    // Section markers on this page, top to bottom
+    const markers = rawPageItems
+      .filter((i) => i.x < 110 && (i.text.trim() === "Pending" || i.text.trim() === "Posted"))
+      .map((i) => ({ y: i.y, section: i.text.trim().toLowerCase() as "pending" | "posted" }))
+      .sort((a, b) => b.y - a.y);
+
+    // The section in force at a given y: the lowest marker still above it.
+    const sectionAt = (y: number): "pending" | "posted" => {
+      const above = markers.filter((m) => m.y > y);
+      return above.length > 0 ? above[above.length - 1].section : carriedSection;
+    };
 
     // Date items: x in [70,100], matching date pattern
     const dateItems = pageItems
@@ -451,7 +496,11 @@ export async function parseGecuPdfExport(
       const amount = amountItem ? parseHistDollar(amountItem.text) : null;
       const balance = balanceItem ? parseHistDollar(balanceItem.text) : null;
 
-      if (amount === null || balance === null) continue;
+      // Pending rows print "-" in the balance column — keep the charge, drop
+      // the balance. Posted rows without a balance are malformed; skip those.
+      const isPending = sectionAt(dateY) === "pending";
+      if (amount === null) continue;
+      if (!isPending && balance === null) continue;
 
       const description = descParts.join(" ").trim();
       if (!description) continue;
@@ -461,16 +510,19 @@ export async function parseGecuPdfExport(
         date: dateStr,
         description,
         amount,
-        balance,
+        balance: isPending ? 0 : balance!,
         category: categorizeTransaction(description),
         statementId,
         seq: seq++,
         source: "statement",
+        ...(isPending ? { pending: true } : {}),
       });
     }
+
+    if (markers.length > 0) carriedSection = markers[markers.length - 1].section;
   }
 
-  return { transactions, periodStart, periodEnd };
+  return { transactions, periodStart, periodEnd, availableBalance, postedBalance };
 }
 
 export function detectStatementPeriod(

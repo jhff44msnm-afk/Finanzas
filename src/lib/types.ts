@@ -10,6 +10,12 @@ export interface Account {
   accountNumber?: string;
   cuentaNumber?: string;
   clabeNumber?: string;
+  /** "Available Balance" as reported by the bank — includes pending holds. */
+  availableBalance?: number;
+  /** "Balance" as reported by the bank — posted transactions only. */
+  postedBalance?: number;
+  /** Statement date the two balances above were read from (ISO). */
+  balanceAsOf?: string;
 }
 
 export interface Transaction {
@@ -23,6 +29,8 @@ export interface Transaction {
   seq: number;
   accountId?: string;
   source?: "statement" | "manual";
+  /** Authorization hold not yet posted. `balance` is unknown (0) for these. */
+  pending?: boolean;
 }
 
 export interface Statement {
