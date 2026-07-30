@@ -1,14 +1,14 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Search, Pencil, Check, X, Filter, Plus, Calendar, Trash2, AlertTriangle, FileText } from "lucide-react";
+import { Search, Pencil, Check, X, Filter, Plus, Calendar, Trash2, AlertTriangle, FileText, Copy, Clock } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import { useAppState, useAppDispatch } from "@/lib/store";
 import { CATEGORIES, CATEGORY_COLORS, vendorPattern } from "@/lib/categories";
 import { formatCurrency, currencySymbol } from "@/lib/currency";
 
 export default function TransactionsView() {
-  const { transactions, accounts, activeAccountId } = useAppState();
+  const { transactions, accounts, activeAccountId, quarantinedDuplicates } = useAppState();
   const dispatch = useAppDispatch();
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("All");
@@ -55,6 +55,17 @@ export default function TransactionsView() {
     }
     return dupeSet;
   }, [accountTransactions]);
+
+  // Rows an import held back because an identical charge already existed.
+  const heldDuplicates = useMemo(() => {
+    const list =
+      activeAccountId === "all"
+        ? quarantinedDuplicates
+        : quarantinedDuplicates.filter(
+            (t) => t.accountId === activeAccountId || !t.accountId
+          );
+    return [...list].sort((a, b) => b.date.localeCompare(a.date));
+  }, [quarantinedDuplicates, activeAccountId]);
 
   const filtered = useMemo(() => {
     let result = [...accountTransactions];
@@ -144,12 +155,15 @@ export default function TransactionsView() {
     if (!newDescription.trim() || isNaN(amt) || amt === 0) return;
     const finalAmt = newIsExpense ? -Math.abs(amt) : Math.abs(amt);
 
-    // Derive balance from the most recent transaction
-    const sorted = [...transactions].sort((a, b) => {
-      const dateCmp = new Date(a.date).getTime() - new Date(b.date).getTime();
-      if (dateCmp !== 0) return dateCmp;
-      return (a.seq ?? 0) - (b.seq ?? 0);
-    });
+    // Derive balance from the most recent posted transaction — pending holds
+    // carry no running balance.
+    const sorted = transactions
+      .filter((t) => !t.pending)
+      .sort((a, b) => {
+        const dateCmp = new Date(a.date).getTime() - new Date(b.date).getTime();
+        if (dateCmp !== 0) return dateCmp;
+        return (a.seq ?? 0) - (b.seq ?? 0);
+      });
     const lastBalance = sorted.length > 0 ? sorted[sorted.length - 1].balance : 0;
 
     const maxSeq = transactions.reduce((max, t) => Math.max(max, t.seq ?? 0), 0);
@@ -196,11 +210,71 @@ export default function TransactionsView() {
         </button>
       </div>
 
+      {heldDuplicates.length > 0 && (
+        <div className="bg-white rounded-2xl border border-[#D4A76A]/40 overflow-hidden">
+          <div className="flex items-center justify-between gap-2 bg-[#D4A76A]/10 px-4 py-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <Copy size={16} className="text-[#D4A76A] shrink-0" />
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-[#8A6A34]">
+                  Duplicates held back ({heldDuplicates.length})
+                </p>
+                <p className="text-[11px] text-[#A38853] mt-0.5">
+                  Same date, description &amp; amount as a charge you already have.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => dispatch({ type: "CLEAR_DUPLICATES" })}
+              className="shrink-0 text-xs font-medium text-[#8A6A34] hover:text-[#C4756E] px-2.5 py-1.5 rounded-lg hover:bg-white/60 transition-colors"
+            >
+              Clear all
+            </button>
+          </div>
+          <div className="divide-y divide-[#F0E9E0]">
+            {heldDuplicates.map((tx) => {
+              const txAccount = accounts.find((a) => a.id === tx.accountId);
+              const txCurrency = txAccount?.currency ?? currency;
+              return (
+                <div key={tx.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-[#2D2D2D] truncate">{tx.description}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-[10px] text-[#B5AFA6]">{tx.date}</span>
+                      <span
+                        className={`text-xs font-semibold ${tx.amount >= 0 ? "text-[#6B9B7A]" : "text-[#C4756E]"}`}
+                      >
+                        {tx.amount >= 0 ? "+" : "-"}
+                        {formatCurrency(tx.amount, txCurrency)}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => dispatch({ type: "APPROVE_DUPLICATE", payload: tx.id })}
+                      className="flex items-center gap-1 bg-[#6B9B7A] text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-[#5C8A6B] transition-colors"
+                    >
+                      <Check size={13} /> Add
+                    </button>
+                    <button
+                      onClick={() => dispatch({ type: "DISCARD_DUPLICATE", payload: tx.id })}
+                      className="flex items-center gap-1 bg-[#C4756E]/10 text-[#C4756E] px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-[#C4756E]/20 transition-colors"
+                    >
+                      <Trash2 size={13} /> Delete
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {dupeCount > 0 && (
         <div className="flex items-center gap-3 bg-[#D4A76A]/10 border border-[#D4A76A]/20 text-[#D4A76A] px-4 py-3 rounded-xl text-sm">
           <AlertTriangle size={18} />
           <span>
-            <strong>{dupeCount}</strong> potential duplicate{dupeCount !== 1 ? "s" : ""} detected (same date, description &amp; amount)
+            <strong>{dupeCount}</strong> potential duplicate{dupeCount !== 1 ? "s" : ""} already in your ledger (same date, description &amp; amount)
           </span>
         </div>
       )}
@@ -381,6 +455,12 @@ export default function TransactionsView() {
                               e-statement
                             </span>
                           )}
+                          {tx.pending && (
+                            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-[#D4A76A]/15 text-[#B08A45] flex items-center gap-0.5">
+                              <Clock size={8} />
+                              pending
+                            </span>
+                          )}
                           {isDupe && (
                             <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-[#D4A76A]/15 text-[#D4A76A]">
                               Duplicate?
@@ -394,7 +474,7 @@ export default function TransactionsView() {
                         <p className={`text-sm font-semibold ${tx.amount >= 0 ? "text-[#6B9B7A]" : "text-[#C4756E]"}`}>
                           {tx.amount >= 0 ? "+" : "-"}{formatCurrency(tx.amount, txCurrency)}
                         </p>
-                        {!isManual && tx.balance !== 0 && (
+                        {!isManual && !tx.pending && tx.balance !== 0 && (
                           <p className="text-[10px] text-[#B5AFA6]">{currencySymbol(txCurrency)}{tx.balance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                         )}
                       </div>

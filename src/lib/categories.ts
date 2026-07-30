@@ -50,6 +50,27 @@ const CATEGORY_RULES: [string[], string][] = [
   ],
   [
     [
+      // Tuition & schools
+      "TUITION", "UNIVERSITY", "UNIVERSIDAD", "COMMUNITY COLLEGE",
+      "COLLEGE OF ", "SCHOOL", "ESCUELA", "ACADEMIA", "REGISTRAR", "BURSAR",
+      "UTEP ", "EPCC ", "STUDENT LOAN", "STUDENT ACCT", "SALLIE MAE",
+      "NELNET", "MOHELA", "NAVIENT", "FAFSA", "COLEGIATURA", "INSCRIPCION",
+      // Online learning
+      "COURSERA", "UDEMY", "EDX ", "KHAN ACADEMY", "PLURALSIGHT", "CODECADEMY",
+      "DATACAMP", "LINKEDIN LEARNING", "SKILLSHARE", "MASTERCLASS", "DUOLINGO",
+      "BABBEL", "ROSETTA STONE", "BRILLIANT.ORG", "CHEGG", "COURSE HERO",
+      "QUIZLET", "GRAMMARLY", "TURNITIN",
+      // Books & course materials
+      "TEXTBOOK", "BOOKSTORE", "LIBRERIA", "SCHOLASTIC", "PEARSON",
+      "MCGRAW HILL", "CENGAGE",
+      // Testing & certification
+      "COLLEGEBOARD", "COLLEGE BOARD", "EDUCATIONAL TESTING", "PROMETRIC",
+      "PEARSON VUE", "CERTIPORT",
+    ],
+    "Education",
+  ],
+  [
+    [
       // Streaming
       "SPOTIFY", "NETFLIX", "DISNEY PLUS", "DISNEY+", "HULU ", "HBO ", "HBOMAX",
       "PEACOCK", "PARAMOUNT+", "SLING TV", "ESPN PLUS", "ESPN+",
@@ -61,8 +82,8 @@ const CATEGORY_RULES: [string[], string][] = [
       "AMC THEATRE", "REGAL ", "CINEMARK", "ALAMO DRAFTHOUSE", "MOVIE TICKET",
       // Events
       "TICKETMASTER", "EVENTBRITE", "STUBHUB", "SEATGEEK", "VIVID SEATS",
-      // Books/learning
-      "AUDIBLE", "KINDLE ", "SCRIBD", "DUOLINGO", "SKILLSHARE", "MASTERCLASS",
+      // Books/audio
+      "AUDIBLE", "KINDLE ", "SCRIBD",
       // AI/apps
       "CHATGPT", "OPENAI", "CLAUDE",
       // Existing
@@ -88,6 +109,8 @@ const CATEGORY_RULES: [string[], string][] = [
       "WALGREENS", "CVS ", "CVS/", "RITE AID",
       // Home/hobbies
       "IKEA ", "MICHAELS ", "HOBBY LOBBY", "JOANN ", "PETCO ", "PETSMART",
+      // Office/sporting goods
+      "OFFICE DEPOT", "OFFICEMAX", "STAPLES ", "ACADEMY SPORTS", "DICK'S SPORT",
       // Existing
       "AUTOZONE", "TOSKA", "TOP BELLEZA", "CIBER FLY", "FERRETERIA",
       "MERCADO PAGO", "POCKETS",
@@ -199,6 +222,7 @@ export const CATEGORIES = [
   "Transportation",
   "Entertainment",
   "Shopping",
+  "Education",
   "Bills & Subscriptions",
   "Insurance",
   "Transfers",
@@ -215,6 +239,7 @@ export const CATEGORY_COLORS: Record<string, string> = {
   Transportation: "#D4A76A",
   Entertainment: "#9B7EB5",
   Shopping: "#C48B9F",
+  Education: "#7A93B5",
   "Bills & Subscriptions": "#7C8C6E",
   Insurance: "#6BA3A0",
   Transfers: "#8B8578",

@@ -27,6 +27,7 @@ import {
 import { useAppState } from "@/lib/store";
 import { CATEGORY_COLORS } from "@/lib/categories";
 import { formatCurrency, currencySymbol, getUsdMxnRate } from "@/lib/currency";
+import { totalBalance } from "@/lib/balance";
 
 function getWeekNumber(dateStr: string): number {
   const d = new Date(dateStr);
@@ -184,6 +185,11 @@ export default function Dashboard() {
     return "Good evening";
   }, []);
 
+  const balance = useMemo(
+    () => totalBalance(accounts, transactions, activeAccountId),
+    [accounts, transactions, activeAccountId]
+  );
+
   const stats = useMemo(() => {
     if (accountTransactions.length === 0) {
       return {
@@ -194,7 +200,6 @@ export default function Dashboard() {
         weeklyData: [],
         categoryData: [],
         recentTx: [],
-        currentBalance: 0,
         currentMonth: "",
       };
     }
@@ -206,7 +211,6 @@ export default function Dashboard() {
     });
 
     const lastTx = sorted[sorted.length - 1];
-    const currentBalance = lastTx.balance;
 
     // Always anchor to today's calendar month so manual entries this month
     // are included even before the next statement arrives.
@@ -281,7 +285,6 @@ export default function Dashboard() {
       weeklyData,
       categoryData,
       recentTx,
-      currentBalance,
       currentMonth,
     };
   }, [accountTransactions]);
@@ -314,19 +317,28 @@ export default function Dashboard() {
 
   const balanceInUsd =
     currency === "MXN" && usdRate
-      ? stats.currentBalance / usdRate
+      ? balance.available / usdRate
       : null;
+
+  // Pending holds are already subtracted from the available balance; surface
+  // them so the number doesn't look off next to the posted running balance.
+  const balanceSubtitle =
+    balanceInUsd !== null
+      ? `~$${balanceInUsd.toFixed(2)} USD`
+      : balance.pendingCount > 0
+        ? `${formatCurrency(Math.abs(balance.pendingTotal), currency)} pending · ${formatCurrency(balance.posted, currency)} posted`
+        : balance.fromBank
+          ? "Available balance"
+          : undefined;
 
   const statCards = [
     {
       label: "Balance",
-      value: stats.currentBalance,
+      value: balance.available,
       icon: Wallet,
       iconColor: "#7C8C6E",
       iconBg: "bg-[#7C8C6E]/10",
-      subtitle: balanceInUsd !== null
-        ? `~$${balanceInUsd.toFixed(2)} USD`
-        : undefined,
+      subtitle: balanceSubtitle,
     },
     {
       label: "Income",

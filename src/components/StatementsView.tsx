@@ -3,7 +3,7 @@
 import { useState, useCallback } from "react";
 import { Upload, FileText, Trash2, AlertCircle, CheckCircle2, Loader2, Landmark, AlertTriangle, Download, UploadCloud, Camera } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
-import { useAppState, useAppDispatch } from "@/lib/store";
+import { useAppState, useAppDispatch, duplicateKey } from "@/lib/store";
 import type { Transaction, Statement, Account } from "@/lib/types";
 import { parsePdfFile, detectStatementPeriod, isGecuHistoryPdf, parseGecuHistoryPdf, isGecuPdfExport, parseGecuPdfExport } from "@/lib/pdf-parser";
 import { parseBbvaPdf, isBbvaPdf } from "@/lib/bbva-parser";
@@ -15,6 +15,13 @@ interface PendingUpload {
   taggedTransactions: Transaction[];
   conflictingManualIds: string[];
   successMsg: string;
+  /** Bank-reported balances to store on the account, when the PDF has them. */
+  balanceUpdate?: {
+    accountId: string;
+    availableBalance?: number;
+    postedBalance?: number;
+    balanceAsOf?: string;
+  };
 }
 
 export default function StatementsView() {
@@ -38,10 +45,28 @@ export default function StatementsView() {
       }
       dispatch({ type: "ADD_STATEMENT", payload: pending.statement });
       dispatch({ type: "ADD_TRANSACTIONS", payload: pending.taggedTransactions });
-      setSuccess(pending.successMsg);
+      if (pending.balanceUpdate) {
+        dispatch({ type: "SET_ACCOUNT_BALANCE", payload: pending.balanceUpdate });
+      }
+
+      // Mirror the reducer's duplicate check so the toast can mention rows that
+      // were held back instead of added.
+      const keys = new Set(transactions.map(duplicateKey));
+      let held = 0;
+      for (const t of pending.taggedTransactions) {
+        const key = duplicateKey(t);
+        if (keys.has(key)) held++;
+        else keys.add(key);
+      }
+
+      setSuccess(
+        held > 0
+          ? `${pending.successMsg} ${held} identical charge${held !== 1 ? "s" : ""} held for review in Activity.`
+          : pending.successMsg
+      );
       setPendingUpload(null);
     },
-    [dispatch]
+    [dispatch, transactions]
   );
 
   const processFile = useCallback(
@@ -80,7 +105,8 @@ export default function StatementsView() {
         const isGecuExport = !isGecuHistory && isGecuPdfExport(sampleText);
 
         if (isGecuExport) {
-          const { transactions: parsed, periodStart, periodEnd } = await parseGecuPdfExport(file, statementId);
+          const { transactions: parsed, periodStart, periodEnd, availableBalance, postedBalance } =
+            await parseGecuPdfExport(file, statementId);
 
           if (parsed.length === 0) {
             setError("No transactions found in this GECU PDF export.");
@@ -135,11 +161,26 @@ export default function StatementsView() {
             )
             .map((t) => t.id);
 
+          const pendingCount = parsed.filter((t) => t.pending).length;
+          const pendingNote =
+            pendingCount > 0
+              ? ` ${pendingCount} pending hold${pendingCount !== 1 ? "s" : ""} included.`
+              : "";
+
           const pending: PendingUpload = {
             statement,
             taggedTransactions,
             conflictingManualIds,
-            successMsg: `Imported ${parsed.length} transactions from GECU PDF export "${file.name}".`,
+            successMsg: `Imported ${parsed.length} transactions from GECU PDF export "${file.name}".${pendingNote}`,
+            balanceUpdate:
+              availableBalance !== undefined || postedBalance !== undefined
+                ? {
+                    accountId: targetAccountId,
+                    availableBalance,
+                    postedBalance,
+                    balanceAsOf: periodEnd || new Date().toISOString().slice(0, 10),
+                  }
+                : undefined,
           };
 
           if (conflictingManualIds.length > 0) {
