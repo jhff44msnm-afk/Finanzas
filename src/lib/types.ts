@@ -78,6 +78,12 @@ export interface RecurringBill {
   amount: number;
   frequency: "weekly" | "biweekly" | "monthly" | "custom";
   customMonths?: number;
+  /**
+   * A known due-date occurrence (ISO) that a custom interval counts from.
+   * Without it "every N months on day D" has no starting point and collapses
+   * to monthly. Only meaningful when frequency is "custom".
+   */
+  anchorDate?: string;
   dueDay: number;
   category: string;
   accountId?: string;

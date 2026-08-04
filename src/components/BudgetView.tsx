@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import {
   Plus,
   Trash2,
@@ -69,14 +69,72 @@ function classifyPriority(category: string, description: string): Priority {
   return "Important";
 }
 
+function startOfToday(): Date {
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  return now;
+}
+
+function parseIsoDate(iso: string): Date {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+/**
+ * The custom-interval occurrences bracketing today.
+ *
+ * A custom cycle repeats every `customMonths` from `anchorDate`, so it has to
+ * be stepped from that anchor — checking only whether this month's due day has
+ * passed makes every interval behave like a monthly one. Bills saved before
+ * anchors existed fall back to the most recent due day, which at least keeps
+ * them stepping by the right interval.
+ */
+function customOccurrences(bill: RecurringBill): { last: Date; next: Date } {
+  const months = Math.max(1, bill.customMonths ?? 1);
+  const now = startOfToday();
+
+  let anchor: Date;
+  if (bill.anchorDate) {
+    anchor = parseIsoDate(bill.anchorDate);
+  } else {
+    anchor = new Date(now.getFullYear(), now.getMonth(), bill.dueDay);
+    if (anchor > now) anchor.setMonth(anchor.getMonth() - 1);
+  }
+  anchor.setHours(0, 0, 0, 0);
+
+  const at = (i: number) => {
+    const d = new Date(
+      anchor.getFullYear(),
+      anchor.getMonth() + i * months,
+      anchor.getDate()
+    );
+    d.setHours(0, 0, 0, 0);
+    return d;
+  };
+
+  // Jump close to today, then walk the last step or two exactly. k never goes
+  // below 0: the anchor is the first occurrence, so a bill whose anchor is
+  // still ahead has no missed cycle behind it.
+  const monthsApart =
+    (now.getFullYear() - anchor.getFullYear()) * 12 +
+    (now.getMonth() - anchor.getMonth());
+  let k = Math.max(0, Math.floor(monthsApart / months));
+  while (k > 0 && at(k) > now) k--;
+  while (at(k + 1) <= now) k++;
+
+  const last = at(k);
+  return { last, next: last > now ? last : at(k + 1) };
+}
+
 function getNextDueDate(bill: RecurringBill): Date {
   const now = new Date();
   now.setHours(0, 0, 0, 0);
 
-  if (bill.frequency === "monthly" || bill.frequency === "custom") {
-    const months = bill.frequency === "custom" ? (bill.customMonths ?? 1) : 1;
+  if (bill.frequency === "custom") return customOccurrences(bill).next;
+
+  if (bill.frequency === "monthly") {
     const due = new Date(now.getFullYear(), now.getMonth(), bill.dueDay);
-    if (due <= now) due.setMonth(due.getMonth() + months);
+    if (due <= now) due.setMonth(due.getMonth() + 1);
     return due;
   }
   if (bill.frequency === "biweekly") {
@@ -97,10 +155,11 @@ function getLastDueDate(bill: RecurringBill): Date {
   const now = new Date();
   now.setHours(0, 0, 0, 0);
 
-  if (bill.frequency === "monthly" || bill.frequency === "custom") {
-    const months = bill.frequency === "custom" ? (bill.customMonths ?? 1) : 1;
+  if (bill.frequency === "custom") return customOccurrences(bill).last;
+
+  if (bill.frequency === "monthly") {
     const due = new Date(now.getFullYear(), now.getMonth(), bill.dueDay);
-    if (due > now) due.setMonth(due.getMonth() - months);
+    if (due > now) due.setMonth(due.getMonth() - 1);
     return due;
   }
   if (bill.frequency === "biweekly") {
@@ -657,10 +716,12 @@ function BillForm({
   initial,
   onSave,
   onCancel,
+  suggestNextDue,
 }: {
   initial?: RecurringBill;
   onSave: (data: Omit<RecurringBill, "id">) => void;
   onCancel: () => void;
+  suggestNextDue: (months: number) => string;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [amount, setAmount] = useState(initial?.amount != null ? String(initial.amount) : "");
@@ -668,18 +729,33 @@ function BillForm({
   const [customMonths, setCustomMonths] = useState(initial?.customMonths ?? 2);
   const [dueDay, setDueDay] = useState(initial?.dueDay != null ? String(initial.dueDay) : "");
   const [category, setCategory] = useState(initial?.category ?? "Bills & Subscriptions");
+  const [pickedDue, setPickedDue] = useState(initial?.anchorDate ?? "");
+  // Once the user picks a date themselves, stop re-suggesting one.
+  const [nextDueTouched, setNextDueTouched] = useState(!!initial?.anchorDate);
+
+  // Until the user picks a date, the suggestion tracks the chosen interval.
+  const nextDue = nextDueTouched
+    ? pickedDue
+    : frequency === "custom"
+      ? suggestNextDue(customMonths)
+      : "";
 
   const inputClass =
     "w-full border border-[#E8E2DA] rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[#7C8C6E] bg-white text-[#2D2D2D]";
 
   const handleSave = () => {
-    if (!name || !amount || !dueDay) return;
+    if (!name || !amount) return;
+    if (frequency === "custom" ? !nextDue : !dueDay) return;
+    // For custom bills the anchor date is the source of truth; the due day is
+    // derived from it so the two can never disagree.
+    const anchorDay = frequency === "custom" ? parseIsoDate(nextDue).getDate() : parseInt(dueDay);
     onSave({
       name,
       amount: parseFloat(amount),
       frequency,
       customMonths: frequency === "custom" ? customMonths : undefined,
-      dueDay: parseInt(dueDay),
+      anchorDate: frequency === "custom" ? nextDue : undefined,
+      dueDay: anchorDay,
       category,
     });
   };
@@ -726,22 +802,42 @@ function BillForm({
           </select>
         </div>
         {frequency === "custom" && (
-          <div className="col-span-2">
-            <label className="block text-[10px] text-[#8B8578] mb-1 font-medium uppercase tracking-wider">
-              Every
-            </label>
-            <select
-              value={customMonths}
-              onChange={(e) => setCustomMonths(parseInt(e.target.value))}
-              className={inputClass}
-            >
-              {CUSTOM_MONTHS_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </div>
+          <>
+            <div className="col-span-2">
+              <label className="block text-[10px] text-[#8B8578] mb-1 font-medium uppercase tracking-wider">
+                Every
+              </label>
+              <select
+                value={customMonths}
+                onChange={(e) => setCustomMonths(parseInt(e.target.value))}
+                className={inputClass}
+              >
+                {CUSTOM_MONTHS_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="col-span-2">
+              <label className="block text-[10px] text-[#8B8578] mb-1 font-medium uppercase tracking-wider">
+                Next Due Date
+              </label>
+              <input
+                type="date"
+                value={nextDue}
+                onChange={(e) => {
+                  setPickedDue(e.target.value);
+                  setNextDueTouched(true);
+                }}
+                className={inputClass}
+              />
+              <p className="text-[10px] text-[#B5AFA6] mt-1">
+                Repeats {customMonths === 12 ? "every year" : `every ${customMonths} months`} from this date.
+              </p>
+            </div>
+          </>
         )}
-        <div className={frequency === "custom" ? "col-span-2" : ""}>
+        {frequency !== "custom" && (
+        <div>
           <label className="block text-[10px] text-[#8B8578] mb-1 font-medium uppercase tracking-wider">
             {frequency === "weekly" ? "Day of Week" : "Due Day"}
           </label>
@@ -774,7 +870,8 @@ function BillForm({
             />
           )}
         </div>
-        <div className={frequency === "weekly" ? "col-span-2" : ""}>
+        )}
+        <div className={frequency === "weekly" || frequency === "custom" ? "col-span-2" : ""}>
           <label className="block text-[10px] text-[#8B8578] mb-1 font-medium uppercase tracking-wider">
             Category
           </label>
@@ -830,6 +927,31 @@ function BillsChecklist() {
     lastPaid.setHours(0, 0, 0, 0);
     return lastPaid >= lastDue;
   };
+
+  /**
+   * Where a custom cycle should start when the user picks an interval.
+   *
+   * Switching an already-paid bill to "every N months" should land N months
+   * after the cycle just paid — not next month. An unpaid cycle anchors on its
+   * own due date so an overdue bill stays overdue.
+   */
+  const suggestNextDue = useCallback(
+    (bill: RecurringBill | undefined, months: number): string => {
+      const toIso = (d: Date) =>
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+      if (!bill) return toIso(startOfToday());
+
+      const lastDue = getLastDueDate(bill);
+      if (!isAlreadyPaidThisCycle(bill)) return toIso(lastDue);
+
+      const next = new Date(lastDue);
+      next.setMonth(next.getMonth() + months);
+      return toIso(next);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [billPayments]
+  );
 
   const addBill = (data: Omit<RecurringBill, "id">) => {
     dispatch({
@@ -961,6 +1083,7 @@ function BillsChecklist() {
         <BillForm
           onSave={addBill}
           onCancel={() => setShowForm(false)}
+          suggestNextDue={(months) => suggestNextDue(undefined, months)}
         />
       )}
 
@@ -1046,6 +1169,7 @@ function BillsChecklist() {
                     initial={bill}
                     onSave={(data) => updateBill(bill.id, data)}
                     onCancel={() => setEditingBillId(null)}
+                    suggestNextDue={(months) => suggestNextDue(bill, months)}
                   />
                 </div>
               );
