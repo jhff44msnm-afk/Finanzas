@@ -304,7 +304,6 @@ export async function parseGecuHistoryPdf(
   const periodEnd   = periodMatch ? slashToIso(periodMatch[2]) : "";
 
   const transactions: Transaction[] = [];
-  let seq = 0;
   let descParts: string[] = [];
   let rightItems: { y: number; val: number }[] = [];
   let maxDescY = -Infinity;
@@ -323,7 +322,7 @@ export async function parseGecuHistoryPdf(
     transactions.push({
       id: uuidv4(), date: dateStr, description, amount, balance,
       category: categorizeTransaction(description),
-      statementId, seq: seq++, source: "statement",
+      statementId, seq: 0, source: "statement", // placeholder — normalized below
     });
   };
 
@@ -344,6 +343,15 @@ export async function parseGecuHistoryPdf(
     }
   }
   flush(""); // discard any trailing partial block
+
+  // This export lists transactions newest-first (page 1 is the most recent),
+  // so rows are collected in that order — but the rest of the app treats a
+  // higher seq as more recent (new manual entries get `maxSeq + 1`). Flip the
+  // numbering here so same-day rows still sort correctly everywhere else.
+  const total = transactions.length;
+  transactions.forEach((t, i) => {
+    t.seq = total - 1 - i;
+  });
 
   return { transactions, periodStart, periodEnd };
 }
@@ -442,7 +450,6 @@ export async function parseGecuPdfExport(
   const postedBalance = summaryBalance("Balance");
 
   const transactions: Transaction[] = [];
-  let seq = 0;
   // The "Pending" / "Posted" headers only appear where the section changes, so
   // the section carries over onto continuation pages.
   let carriedSection: "pending" | "posted" = "posted";
@@ -514,7 +521,7 @@ export async function parseGecuPdfExport(
         balance: isPending ? 0 : balance!,
         category: categorizeTransaction(description),
         statementId,
-        seq: seq++,
+        seq: 0, // placeholder — normalized below
         source: "statement",
         ...(isPending ? { pending: true } : {}),
       });
@@ -522,6 +529,15 @@ export async function parseGecuPdfExport(
 
     if (markers.length > 0) carriedSection = markers[markers.length - 1].section;
   }
+
+  // The PDF lists transactions newest-first (page 1 is the most recent), so
+  // rows are collected in that order — but the rest of the app treats a
+  // higher seq as more recent (new manual entries get `maxSeq + 1`). Flip the
+  // numbering here so same-day rows still sort correctly everywhere else.
+  const total = transactions.length;
+  transactions.forEach((t, i) => {
+    t.seq = total - 1 - i;
+  });
 
   return { transactions, periodStart, periodEnd, availableBalance, postedBalance };
 }
