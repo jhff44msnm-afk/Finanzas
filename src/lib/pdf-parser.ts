@@ -349,11 +349,12 @@ export async function parseGecuHistoryPdf(
 }
 
 // ---- GECU PDF Print Export parser (second format) ----
-// Detected by "G E C U |" header and "CHECKING ****" account line.
+// Detected by "G E C U |" header and a "CHECKING ..." account line — masked
+// ("CHECKING ******7755") or the full unmasked number ("CHECKING 10961639 - 2000").
 // Layout: date x≈79, description x≈154 (multi-line), amount x≈388, balance x≈490, all dollar values same y as date.
 
 export function isGecuPdfExport(text: string): boolean {
-  return text.includes("G E C U |") && /CHECKING \*+\d/.test(text);
+  return text.includes("G E C U |") && /CHECKING \S/.test(text);
 }
 
 const GECU_PDF_SKIP = new Set([
@@ -361,7 +362,7 @@ const GECU_PDF_SKIP = new Set([
   "Available Balance", "G E C U |",
 ]);
 const GECU_PDF_SKIP_RE = [
-  /^CHECKING \*+\d*/i,
+  /^CHECKING \S.*/i,
   /^G E C U \|/,
   /^Página \d+ de \d+$/,
   /^https?:\/\//,
